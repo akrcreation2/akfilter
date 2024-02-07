@@ -64,8 +64,6 @@ async def schedule_verifications(self):
         if current_time in verification_times:
             # Perform verification task here
             print("Performing verification task at", current_time)
-            # You can call your verification function here
-            # For example: await self.verify_links()
         await asyncio.sleep(60)  # Check every minute
 
 # Call schedule_verifications function to start scheduling tasks
