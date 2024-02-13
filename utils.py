@@ -622,7 +622,7 @@ async def send_all(bot, userid, files, ident):
     if IS_VERIFY and not await check_verification(bot, userid):
         btn = [[
             InlineKeyboardButton("Vᴇʀɪғʏ", url=await get_token(bot, userid, f"https://telegram.me/{temp.U_NAME}?start=", 'send_all')),
-            InlineKeyboardButton("Hᴏᴡ Tᴏ Vᴇʀɪғʏ", url=HOW_TO_VERIFY)
+            InlineKeyboardButton("Hᴏᴡ Tᴏ Vᴇʀɪғʏ", url="https://t.me/open_link_trick/15")
         ]]
         await bot.send_message(
             chat_id=userid,
