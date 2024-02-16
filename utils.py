@@ -1,6 +1,6 @@
 import logging
 from pyrogram.errors import InputUserDeactivated, UserNotParticipant, FloodWait, UserIsBlocked, PeerIdInvalid, ChatAdminRequired
-from info import AUTH_CHANNEL, LONG_IMDB_DESCRIPTION, MAX_LIST_ELM, SHORTLINK_URL, SHORTLINK_API, SHORTLINK_URL1, SHORTLINK_API1, LOG_CHANNEL, GRP_LNK, CHNL_LNK, CUSTOM_FILE_CAPTION, IS_VERIFY, VERIFY2_URL, VERIFY2_API, PROTECT_CONTENT, HOW_TO_VERIFY
+from info import AUTH_CHANNEL, LONG_IMDB_DESCRIPTION, MAX_LIST_ELM, SHORTLINK_URL, SHORTLINK_API, LOG_CHANNEL, GRP_LNK, CHNL_LNK, CUSTOM_FILE_CAPTION, IS_VERIFY, VERIFY2_URL, VERIFY2_API, PROTECT_CONTENT, HOW_TO_VERIFY
 from imdb import Cinemagoer 
 import asyncio
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -501,45 +501,60 @@ async def get_shortlink(chat_id, link):
             else:
                 return f'https://{URL}/api?api={API}&link={link}'
 
-async def get_verify_shorted_link(link):
-    first_API = SHORTLINK_API
-    first_URL = SHORTLINK_URL
-    second_API = SHORTLINK_API1
-    second_URL = SHORTLINK_URL1
-    
+async def get_verify_shorted_link(num, link):
+    if int(num) == 1:
+        API = SHORTLINK_API
+        URL = SHORTLINK_URL
+    else:
+        API = VERIFY2_API
+        URL = VERIFY2_URL
     https = link.split(":")[0]
     if "http" == https:
         https = "https"
         link = link.replace("http", https)
-    
-    first_url = f'https://{first_URL}/api'
-    params = {'api': first_API,
-              'url': link,
-              }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(first_url, params=params, raise_for_status=True, ssl=False) as response:
-                data = await response.json()
-                if data["status"] == "success":
-                    first_shortened_url = data['shortenedUrl']
-                    second_params = {'api': second_API,
-                                     'url': first_shortened_url,
-                                     }
-                    second_url = f'https://{second_URL}/api'
-                    async with session.get(second_url, params=second_params, raise_for_status=True, ssl=False) as second_response:
-                        second_data = await second_response.json()
-                        if second_data["status"] == "success":
-                            return second_data['shortenedUrl']
+
+    if URL == "api.shareus.in":
+        url = f"https://{URL}/shortLink"
+        params = {"token": API,
+                  "format": "json",
+                  "link": link,
+                  }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, raise_for_status=True, ssl=False) as response:
+                    data = await response.json(content_type="text/html")
+                    if data["status"] == "success":
+                        return data["shortlink"]
+                    else:
+                        logger.error(f"Error: {data['message']}")
+                        return f'https://{URL}/shortLink?token={API}&format=json&link={link}'
+
+        except Exception as e:
+            logger.error(e)
+            return f'https://{URL}/shortLink?token={API}&format=json&link={link}'
+    else:
+        url = f'https://{URL}/api'
+        params = {'api': API,
+                  'url': link,
+                  }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, raise_for_status=True, ssl=False) as response:
+                    data = await response.json()
+                    if data["status"] == "success":
+                        return data["shortenedUrl"]
+                    else:
+                        logger.error(f"Error: {data['message']}")
+                        if URL == 'clicksfly.com':
+                            return f'https://{URL}/api?api={API}&url={link}'
                         else:
-                            logger.error(f"Second API Error: {second_data['message']}")
-                            return first_shortened_url  # Returning the first shortened URL as fallback
-                else:
-                    logger.error(f"First API Error: {data['message']}")
-                    return f'https://{first_URL}/api?api={first_API}&link={link}'
-    except Exception as e:
-        logger.error(e)
-        return f'{first_URL}/api?api={first_API}&link={link}'
+                            return f'https://{URL}/api?api={API}&link={link}'
+        except Exception as e:
+            logger.error(e)
+            if URL == 'clicksfly.com':
+                return f'https://{URL}/api?api={API}&url={link}'
+            else:
+                return f'https://{URL}/api?api={API}&link={link}'
 
 
 async def check_token(bot, userid, token):
