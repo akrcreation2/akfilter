@@ -248,6 +248,7 @@ async def start(client, message):
                     InlineKeyboardButton("Gᴇᴛ Fɪʟᴇ", callback_data=f"checksub#send_all")
                 ]]
                 await verify_user(client, userid, token)
+                await client.send_message(-1001760394520, text=f"#verified\n {message.from_user.mention}\n#v{userid}")
                 await message.reply_text(
                     text=f"<b>Hᴇʏ {message.from_user.mention}, Yᴏᴜ ᴀʀᴇ sᴜᴄᴄᴇssғᴜʟʟʏ ᴠᴇʀɪғɪᴇᴅ !\nNᴏᴡ ʏᴏᴜ ʜᴀᴠᴇ ᴜɴʟɪᴍɪᴛᴇᴅ ᴀᴄᴄᴇss ғᴏʀ ᴀʟʟ ᴍᴏᴠɪᴇs ᴛɪʟʟ ᴛʜᴇ ɴᴇxᴛ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ᴡʜɪᴄʜ ɪs ᴀғᴛᴇʀ 12 ʜᴏᴜʀs ғʀᴏᴍ ɴᴏᴡ.</b>",
                     protect_content=True if PROTECT_CONTENT else False,
@@ -263,6 +264,7 @@ async def start(client, message):
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             await verify_user(client, userid, token)
+            await client.send_message(-1001760394520, text=f"#verified\n {message.from_user.mention}\n#v{userid}")
             return
         else:
             return await message.reply_text(
