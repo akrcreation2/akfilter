@@ -129,7 +129,7 @@ Added By - {}
     RESULT_TXT="""<b><blockquote> ʜᴇʏ,     </blockquote>
 <blockquote>ᴊᴜꜱᴛ ꜱᴇᴇ ᴡʜᴀᴛ ɪ ꜰᴏᴜɴᴅ ꜰᴏʀ ʏᴏᴜʀ ꜱᴇᴀʀᴄʜ </blockquote></b>"""
 
-    CUSTOM_FILE_CAPTION = """<i><b>@Knmlpro2 - {file_caption}</b>  \n<b>🔰Pᴏᴡᴇʀᴇᴅ Bʏ ➜ @Knmlpro2 \n🔰Gʀᴏᴜᴘ ➜ @Knmlpro2_group </b></i>"""
+    CUSTOM_FILE_CAPTION = """<i><b>@Cini_Santhe - {file_caption}</b>  \n<b>🔰Pᴏᴡᴇʀᴇᴅ Bʏ ➜ @Cini_Santhe \n🔰Gʀᴏᴜᴘ ➜ @Cini_Santhe_Group </b></i>"""
 
     
     RESTART_GC_TXT = """
