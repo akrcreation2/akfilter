@@ -8,3 +8,5 @@ from .parser import QueryParser
 from .search_engine import SearchEngine
 
 __all__ = ["QueryParser", "SearchEngine", "SearchIntent", "SearchResult"]
+
+from .discovery import MovieCandidate, discover_movies, looks_like_discovery_query
