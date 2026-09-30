@@ -16,8 +16,10 @@ from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerId
 from utils import get_size, is_subscribed, get_poster, search_gagala, temp, get_settings, save_group_settings, create_invite_links, get_shortlink, check_verification, get_token
 from database.users_chats_db import db
 from info import HYPER_MODE
-from database.ia_filterdb import Media, get_file_details
+from database.ia_filterdb import Media, get_file_details, get_search_results
 from ai_search.integration import ai_aware_search
+from ai_search.discovery import discover_movies_with_timeout, looks_like_discovery_query
+from ai_search.discovery_store import get as get_discovery, put as put_discovery
 from database.filters_mdb import (
     del_all,
     find_filter,
@@ -30,6 +32,73 @@ logger.setLevel(logging.ERROR)
 
 BUTTONS = {}
 SPELL_CHECK = {}
+
+
+async def _show_ai_discovery(client, message, query_text):
+    """Show AI-discovered movie titles as buttons; do not query Media here."""
+    movies = await discover_movies_with_timeout(query_text)
+    if not movies:
+        return False
+
+    owner_id = message.from_user.id if message.from_user else 0
+    token = put_discovery(owner_id, movies)
+    page_size = 10
+    page = movies[:page_size]
+    buttons = []
+    for index, movie in enumerate(page):
+        label = movie.title
+        if movie.year:
+            label = f"{label} ({movie.year})"
+        buttons.append([InlineKeyboardButton(label[:60], callback_data=f"aidisc:{token}:{index}")])
+
+    if len(movies) > page_size:
+        buttons.append([
+            InlineKeyboardButton("NEXT ▶️", callback_data=f"aidiscpage:{token}:10")
+        ])
+
+    text = "🎬 <b>AI Movie Discovery</b>\n\n"
+    text += "I found these movie titles from public movie information.\n"
+    text += "Select a movie to search your bot's available files."
+    try:
+        await message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode=enums.ParseMode.HTML,
+            quote=True,
+        )
+    except Exception:
+        return False
+    return True
+
+
+async def _show_ai_discovery_page(query, token, offset):
+    movies = get_discovery(token, query.from_user.id)
+    if movies is None:
+        await query.answer("This AI search has expired. Search again.", show_alert=True)
+        return
+    page_size = 10
+    page = movies[offset:offset + page_size]
+    if not page:
+        await query.answer("No more movies.", show_alert=True)
+        return
+    buttons = []
+    for index, movie in enumerate(page, start=offset):
+        label = movie.title
+        if movie.year:
+            label = f"{label} ({movie.year})"
+        buttons.append([InlineKeyboardButton(label[:60], callback_data=f"aidisc:{token}:{index}")])
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton("◀️ BACK", callback_data=f"aidiscpage:{token}:{max(0, offset-page_size)}"))
+    if offset + page_size < len(movies):
+        nav.append(InlineKeyboardButton("NEXT ▶️", callback_data=f"aidiscpage:{token}:{offset+page_size}"))
+    if nav:
+        buttons.append(nav)
+    try:
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+    except MessageNotModified:
+        pass
+    await query.answer()
 
 
 @Client.on_message(filters.group | filters.private & filters.text & filters.incoming) 
@@ -168,7 +237,60 @@ async def advantage_spoll_choker(bot, query):
 
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
-    if query.data == "close_data":
+    if query.data.startswith("aidiscpage:"):
+        _, token, offset = query.data.split(":", 2)
+        try:
+            offset = int(offset)
+        except Exception:
+            offset = 0
+        return await _show_ai_discovery_page(query, token, offset)
+    elif query.data.startswith("aidisc:"):
+        _, token, index = query.data.split(":", 2)
+        try:
+            index = int(index)
+        except Exception:
+            return await query.answer("Invalid movie selection.", show_alert=True)
+        movies = get_discovery(token, query.from_user.id)
+        if movies is None or index < 0 or index >= len(movies):
+            return await query.answer("This AI search has expired. Search again.", show_alert=True)
+        movie = movies[index]
+        # IMPORTANT: only now do we query the bot's Media/file database.
+        search_title = movie.title
+        if movie.year:
+            search_title = f"{movie.title} {movie.year}"
+        await query.answer("Searching available files…")
+        files, offset, total = await get_search_results(search_title, None, 10, 0, True)
+        if not files:
+            # Retry title-only because filenames often omit the release year.
+            files, offset, total = await get_search_results(movie.title, None, 10, 0, True)
+        if not files:
+            return await query.message.edit_text(
+                f"❌ <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
+                "\n\nNo matching files are available in this bot.",
+                parse_mode=enums.ParseMode.HTML,
+            )
+        # Reuse the existing result renderer/flow.
+        settings = await get_settings(query.message.chat.id)
+        pre = 'filep' if settings['file_secure'] else 'file'
+        buttons = []
+        if settings['button']:
+            buttons = [[InlineKeyboardButton(
+                text=f"📂[{get_size(f.file_size)}] ➵ {f.file_name}",
+                callback_data=f"files#{f.file_id}"
+            )] for f in files]
+        else:
+            buttons = [[
+                InlineKeyboardButton(text=f.file_name, callback_data=f"files#{f.file_id}"),
+                InlineKeyboardButton(text=f"{get_size(f.file_size)}", callback_data=f"files_#{f.file_id}"),
+            ] for f in files]
+        await query.message.edit_text(
+            f"🎬 <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
+            "\n\n📁 Available files:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode=enums.ParseMode.HTML,
+        )
+        return
+    elif query.data == "close_data":
         await query.message.delete()
     elif query.data == "delallconfirm":
         userid = query.from_user.id
@@ -714,6 +836,14 @@ async def auto_filter(client, msg, spoll=False):
         # requests.  Commands/empty messages are still ignored above.
         if 2 < len(message.text) <= 4000:
             search = message.text.strip()
+            # Discovery is a separate first stage. It finds movie titles from
+            # public/AI metadata and DOES NOT touch Media until a title button
+            # is clicked. Technical/file-oriented queries retain the existing
+            # search path unchanged.
+            if looks_like_discovery_query(search):
+                shown = await _show_ai_discovery(client, message, search)
+                if shown:
+                    return
             files, offset, total_results = await ai_aware_search(search.lower(), offset=0, filter=True)
             if not files:
                 if settings["spell_check"]:
