@@ -44,3 +44,30 @@ All other original project files were kept unchanged.
 ## Runtime requirement
 
 No external AI API key is required by this implementation. It is a deterministic local query-understanding/ranking layer using the existing MongoDB data.
+
+
+### Phase 1.1 person-query fix
+
+6. `ai_search/filmography.py`
+   - Adds local title/year hints for Darshan filmography.
+   - Expands person queries into existing movie titles without changing the Media schema or requiring an external API.
+
+7. `ai_search/parser.py`
+   - Adds common Darshan aliases such as `D Boss`, `DBoss`, `Challenging Star`, and Kannada `ದರ್ಶನ್` handling.
+   - Uses newest-first year sorting for actor movie-list queries.
+
+8. `ai_search/adapter.py`
+   - Expands actor queries to known film titles before querying the existing MongoDB collection.
+   - Preserves the original Media documents and Telegram result flow.
+   - Applies year/language/quality/season/episode filters to expanded results.
+
+9. `tests/ai_search/test_filmography.py`
+   - Adds regression coverage for actor title expansion, year inference, and the existing MongoDB adapter contract.
+
+No MongoDB schema, database permissions, Koyeb configuration, Dockerfile, Procfile, or Telegram UI/search-result formatting was changed.
+
+## AI Search Fix (2026-09-30)
+
+- `ai_search/adapter.py`: person/filmography searches now query bounded title chunks instead of one oversized Mongo regex, deduplicate Media results, and respect `USE_CAPTION_FILTER`.
+- `tests/ai_search/test_filmography.py`: updated the provider assertion for chunked filmography queries.
+- No production bot handlers, MongoDB schema, deployment files, captions, buttons, pagination contract, or existing non-AI features were changed.
