@@ -171,3 +171,126 @@ def discover_movies_from_query(query: str, limit: int = 40) -> List[DiscoveredMo
         return []
 
     return discover_person_movies(person, limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Compatibility API used by the existing ai-search phase-1 branch.
+# Keep these names stable so Pyrogram can load the plugin safely.
+# ---------------------------------------------------------------------------
+
+MovieCandidate = DiscoveredMovie
+
+
+def _parse_json_candidates(payload: str) -> List[MovieCandidate]:
+    """Parse a small, deterministic JSON movie list from a public source/adapter."""
+    try:
+        data = json.loads(payload)
+    except Exception:
+        return []
+    raw = data.get("movies", []) if isinstance(data, dict) else []
+    out = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        if not title:
+            continue
+        year = item.get("year")
+        try:
+            year = int(year) if year is not None else None
+        except (TypeError, ValueError):
+            year = None
+        key = (title.casefold(), year)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(MovieCandidate(title=title, year=year))
+    return out
+
+
+def looks_like_discovery_query(query: str) -> bool:
+    """Return True for requests that ask the bot to discover movie titles."""
+    q = (query or "").strip().lower()
+    if not q:
+        return False
+
+    # A direct file query should stay on the proven database path.
+    if re.search(r"\b(2160p|1080p|720p|576p|480p|360p|hdrip|webrip|web[- ]dl|bluray|blu[- ]ray|x264|x265|hevc|season|episode|s\d{1,2}e\d{1,2})\b", q):
+        return False
+
+    discovery_terms = (
+        "movies", "films", "filmography", "acted", "acting", "actor", "actress",
+        "hero", "heroine", "star", "all movies", "list movies", "movie list",
+        "movies of", "films of", "acted together", "together", "film with",
+        "dubbed", "dubbing", "kannada movies", "telugu movies", "tamil movies",
+        "malayalam movies", "this year", "which movies", "what movies",
+        "movies where", "movie where", "song in", "songs in",
+    )
+    if any(term in q for term in discovery_terms):
+        return True
+
+    # Long natural-language requests are candidates for discovery, unless
+    # they clearly contain file-quality search syntax above.
+    return len(q.split()) >= 12
+
+
+def _extract_person_from_query(query: str) -> str:
+    """Conservative person extraction for the free/public discovery path."""
+    q = re.sub(r"\s+", " ", (query or "").strip())
+
+    # Remove common request words, but preserve a multi-word person name.
+    q = re.sub(
+        r"\b(find|show|give|list|all|the|movies?|films?|filmography|"
+        r"acted|acting|actor|actress|hero|heroine|movie|movies|"
+        r"which|what|where|together|with|of|for|in|from|"
+        r"kannada|kannada-language|telugu|tamil|malayalam|hindi|"
+        r"this year|after \d{4}|before \d{4})\b",
+        " ",
+        q,
+        flags=re.I,
+    )
+    q = re.sub(r"\s+", " ", q).strip(" ,.-?")
+
+    # Strip obvious relationship tails.
+    q = re.split(
+        r"\b(?:and|who|that|where|between|with|along with)\b",
+        q,
+        maxsplit=1,
+        flags=re.I,
+    )[0].strip(" ,.-?")
+
+    return q
+
+
+async def discover_movies_with_timeout(query: str, limit: int = 40) -> List[MovieCandidate]:
+    """
+    Async adapter expected by plugins/pm_filter.py.
+
+    Network work is executed in a worker thread so it never blocks the
+    Pyrogram event loop.
+    """
+    import asyncio
+
+    if not looks_like_discovery_query(query):
+        return []
+
+    person = _extract_person_from_query(query)
+    if not person:
+        return []
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(discover_person_movies, person, limit),
+            timeout=15,
+        )
+    except Exception:
+        return []
+
+
+def discover_movies(query: str, limit: int = 40) -> List[MovieCandidate]:
+    """Synchronous compatibility entry point."""
+    if not looks_like_discovery_query(query):
+        return []
+    person = _extract_person_from_query(query)
+    return discover_person_movies(person, limit=limit) if person else []
