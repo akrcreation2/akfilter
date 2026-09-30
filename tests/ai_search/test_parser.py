@@ -32,4 +32,21 @@ class ParserTests(unittest.TestCase):
         intent = self.parser.parse("Kantara Kannada")
         self.assertEqual(intent.title, "Kantara"); self.assertIsNone(intent.person)
 
+    def test_long_natural_language_person_query(self):
+        query = (
+            "Please find all movies acted by Yash and Radhika Pandit in Kannada, "
+            "prefer the latest available releases and show only files that are "
+            "actually present in the database."
+        )
+        intent = self.parser.parse(query)
+        self.assertIn("Yash", intent.persons)
+        self.assertIn("Radhika Pandit", intent.persons)
+        self.assertEqual(intent.language, "Kannada")
+        self.assertEqual(intent.content_type, "movie")
+
+    def test_relative_current_year(self):
+        from datetime import datetime, timezone
+        intent = self.parser.parse("this year Kannada movies")
+        self.assertEqual(intent.year, datetime.now(timezone.utc).year)
+
 if __name__ == "__main__": unittest.main()
