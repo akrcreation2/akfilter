@@ -27,6 +27,8 @@ class SearchIntent:
     known: Dict[str, Any] = field(default_factory=dict)
     inferred: Dict[str, Any] = field(default_factory=dict)
     unknown: List[str] = field(default_factory=list)
+    discovery: bool = False
+    discovery_reason: Optional[str] = None
 
 
 @dataclass
