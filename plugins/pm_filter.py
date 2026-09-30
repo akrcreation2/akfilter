@@ -710,8 +710,10 @@ async def auto_filter(client, msg, spoll=False):
         if message.text.startswith("/"): return  # ignore commands
         if re.findall(r"((^\/|^,|^!|^\.|^[\U0001F600-\U000E007F]).*)", message.text):
             return
-        if 2 < len(message.text) < 100:
-            search = message.text
+        # AI search accepts normal Telegram prose, including long natural-language
+        # requests.  Commands/empty messages are still ignored above.
+        if 2 < len(message.text) <= 4000:
+            search = message.text.strip()
             files, offset, total_results = await ai_aware_search(search.lower(), offset=0, filter=True)
             if not files:
                 if settings["spell_check"]:
