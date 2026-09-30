@@ -8,7 +8,7 @@ import re
 from typing import Dict, List, Tuple
 
 from ai_search.entities import SearchProvider
-from ai_search.filmography import match_person_title, titles_for_person
+from ai_search.filmography import match_person_title, titles_for_person, titles_for_person_async
 from ai_search.metadata import (
     extract_episode,
     extract_season_episode,
@@ -28,13 +28,29 @@ class MongoDBSearchProvider(SearchProvider):
         self.person_term_chunk = max(8, int(person_term_chunk))
 
     @staticmethod
-    def _pattern_terms(intent: SearchIntent) -> List[str]:
+    async def _pattern_terms(intent: SearchIntent) -> List[str]:
         terms = []
-        if intent.person:
-            # The production Media schema has no actor/cast field.  Search the
-            # actor's known film titles instead of looking for the person's name
-            # in every filename.
-            terms.extend(title for title, _ in titles_for_person(intent.person))
+        persons = list(getattr(intent, "persons", []) or [])
+        if intent.person and intent.person.casefold() not in {p.casefold() for p in persons}:
+            persons.insert(0, intent.person)
+
+        if persons:
+            # Expand each person to public/local film titles.  If two people are
+            # requested, use the intersection of their filmographies so "Yash
+            # and Radhika movies" returns only shared films.
+            filmographies = []
+            for person in persons[:4]:
+                titles = await titles_for_person_async(person)
+                filmographies.append(titles)
+
+            if len(filmographies) == 1:
+                terms.extend(title for title, _ in filmographies[0])
+            elif filmographies:
+                common = {title.casefold(): (title, year) for title, year in filmographies[0]}
+                for titles in filmographies[1:]:
+                    other = {title.casefold(): (title, year) for title, year in titles}
+                    common = {k: common[k] for k in common if k in other}
+                terms.extend(title for title, _ in common.values())
 
         for value in [intent.title, *intent.keywords]:
             if value and len(str(value).strip()) >= 2:
@@ -54,7 +70,7 @@ class MongoDBSearchProvider(SearchProvider):
         return re.compile("|".join(escaped), re.IGNORECASE)
 
     async def search(self, intent: SearchIntent) -> List[SearchResult]:
-        terms = self._pattern_terms(intent)
+        terms = await self._pattern_terms(intent)
         if not terms:
             return []
 
@@ -130,8 +146,20 @@ class MongoDBSearchProvider(SearchProvider):
                 # For a person query, ignore a candidate that only matched one of
                 # the generic keywords but is not actually in that person's known
                 # filmography.
-                if titles_for_person(intent.person) and not matched_person_title:
+                local_person_titles = titles_for_person(intent.person)
+                if local_person_titles and not matched_person_title:
                     continue
+                if not local_person_titles and matched_person_title is None:
+                    # Dynamic filmographies were already used to build the query.
+                    # Do not reject a valid remote-filmography match simply
+                    # because the lightweight local matcher has no copy.
+                    matched_person_title = next(
+                        (title for title, _ in await titles_for_person_async(intent.person)
+                         if re.search(re.escape(title), searchable, re.I)),
+                        None
+                    )
+                    if matched_person_title is None:
+                        continue
 
             # Hard filters are applied only when the user explicitly requested them.
             if intent.language and intent.language.casefold() not in folded:
