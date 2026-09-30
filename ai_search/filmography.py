@@ -250,11 +250,108 @@ def person_known_title(
     return title is not None
 
 
+
+# ---------------------------------------------------------------------------
+# Optional dynamic filmography lookup
+# ---------------------------------------------------------------------------
+# The local filmography above is deliberately dependency-free.  For people
+# not present there, AI search can ask Wikidata for a public filmography.
+# This is best-effort and cached in memory; MongoDB remains the source of files.
+import asyncio
+import json
+import time
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+_REMOTE_CACHE: Dict[str, Tuple[float, List[Tuple[str, int]]]] = {}
+_REMOTE_TTL = 6 * 60 * 60
+
+
+def _wikidata_json(url: str, params: Dict[str, str], timeout: float = 6.0):
+    query = urlencode(params)
+    req = Request(
+        f"{url}?{query}",
+        headers={"User-Agent": "akfilter-ai-search/1.0 (movie search bot)"}
+    )
+    with urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _remote_person_titles_sync(person: str) -> List[Tuple[str, int]]:
+    canonical = normalize_person(person) or person.strip()
+    key = canonical.casefold()
+    cached = _REMOTE_CACHE.get(key)
+    if cached and time.time() - cached[0] < _REMOTE_TTL:
+        return list(cached[1])
+
+    # Resolve a human entity by name.
+    search = _wikidata_json(
+        "https://www.wikidata.org/w/api.php",
+        {
+            "action": "wbsearchentities", "search": canonical,
+            "language": "en", "format": "json", "limit": "5",
+        },
+    )
+    candidates = search.get("search", [])
+    qid = None
+    for item in candidates:
+        if item.get("id", "").startswith("Q"):
+            desc = (item.get("description") or "").lower()
+            label = (item.get("label") or "").casefold()
+            if "actor" in desc or "actress" in desc or "film" in desc or label == key:
+                qid = item["id"]
+                break
+    if not qid and candidates:
+        qid = candidates[0].get("id")
+    if not qid:
+        return []
+
+    # Reverse cast-member relation: films where this person is P161.
+    sparql = (
+        "SELECT ?film ?filmLabel ?date WHERE { "
+        f"?film wdt:P161 wd:{qid}. "
+        "OPTIONAL { ?film wdt:P577 ?date. } "
+        "SERVICE wikibase:label { bd:serviceParam wikibase:language \"en\". } "
+        "} ORDER BY DESC(?date) LIMIT 500"
+    )
+    data = _wikidata_json(
+        "https://query.wikidata.org/sparql",
+        {"query": sparql, "format": "json"},
+        timeout=10.0,
+    )
+    values = data.get("results", {}).get("bindings", [])
+    found = {}
+    for row in values:
+        title = row.get("filmLabel", {}).get("value")
+        date = row.get("date", {}).get("value", "")
+        if not title:
+            continue
+        match = re.search(r"(19|20)\d{2}", date)
+        year = int(match.group(0)) if match else 0
+        found[(title.casefold(), year)] = (title, year)
+    result = sorted(found.values(), key=lambda x: (x[1] or 9999, x[0].casefold()), reverse=True)
+    _REMOTE_CACHE[key] = (time.time(), result)
+    return result
+
+
+async def titles_for_person_async(person: Optional[str]) -> List[Tuple[str, int]]:
+    """Return local filmography first, then best-effort public Wikidata data."""
+    local = titles_for_person(person)
+    if local:
+        return local
+    if not person:
+        return []
+    try:
+        return await asyncio.to_thread(_remote_person_titles_sync, person)
+    except Exception:
+        return []
+
 __all__ = [
     "FILMOGRAPHY",
     "PERSON_ALIASES",
     "normalize_person",
     "titles_for_person",
+    "titles_for_person_async",
     "match_person_title",
     "person_known_title",
 ]
