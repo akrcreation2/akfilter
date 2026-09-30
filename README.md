@@ -110,3 +110,9 @@ python3 bot.py</pre>
 <ul> <li><a href="https://github.com/pyrogram/pyrogram" target="_blank">Dan</a> for the Pyrogram Library</li> <li><a href="https://github.com/Mahesh0253/Media-Search-bot" target="_blank">Mahesh</a> for the Media Search Bot</li> <li><a href="https://github.com/EvamariaTG/EvaMaria" target="_blank">EvamariaTG</a> for the EvaMaria Bot</li> <li><a href="https://github.com/trojanzhex/Unlimited-Filter-Bot" target="_blank">Trojanz</a> for Unlimited Filter Bot</li> <li>Goutham for spell check, ping, and restart features</li> <li>MN-TG for editing and modifying this repository</li> <li> If your intrested to Collab with us Just fork this repo and create pull request ------<a href="https://github.com/MN-BOTS/ShobanaFilterBot/fork" target="_blank"> Click Here To Fork Repo  </a></li> </ul> <hr>
 📜 Disclaimer
 <p> <a href="https://www.gnu.org/licenses/agpl-3.0.en.html" target="_blank"> <img src="https://www.gnu.org/graphics/agplv3-155x51.png" alt="GNU AGPLv3"> </a> </p> <p> This project is licensed under the <a href="https://github.com/mn-bots/ShobanaFilterBot/blob/main/LICENSE" target="_blank">GNU AGPL 3.0</a>. <strong>Selling this code for monetary gain is strictly prohibited.</strong> </p> <hr> ```
+
+## AI Movie Discovery
+
+AI discovery is intentionally separate from file search. Configure `OPENAI_API_KEY` in the deployment environment to enable the primary OpenAI web-search path. Optional settings are `OPENAI_MODEL` (default `gpt-4.1-mini`) and `AI_SEARCH_TIMEOUT` (default `35`).
+
+A discovery request such as `Duniya Vijay movies` first produces movie-name/year buttons from public movie information. The bot does not inspect its MongoDB Media collection at this stage. The existing file database is queried only after the user clicks a movie button.
