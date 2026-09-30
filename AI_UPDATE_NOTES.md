@@ -71,3 +71,22 @@ No MongoDB schema, database permissions, Koyeb configuration, Dockerfile, Procfi
 - `ai_search/adapter.py`: person/filmography searches now query bounded title chunks instead of one oversized Mongo regex, deduplicate Media results, and respect `USE_CAPTION_FILTER`.
 - `tests/ai_search/test_filmography.py`: updated the provider assertion for chunked filmography queries.
 - No production bot handlers, MongoDB schema, deployment files, captions, buttons, pagination contract, or existing non-AI features were changed.
+
+## AI Movie Discovery Update
+
+The AI discovery stage is now separate from the Media/file database.
+
+Flow:
+1. User sends a natural-language movie/person/song query.
+2. `ai_search.discovery` uses OpenAI Responses + web search when `OPENAI_API_KEY` is configured.
+3. The bot shows discovered movie titles/years as Telegram buttons.
+4. The Media database is NOT queried during discovery.
+5. Only after a user clicks a movie button does the existing `get_search_results()` file search run.
+6. Existing file buttons/Get File flow remains in place.
+
+Recommended Koyeb environment variables:
+- `OPENAI_API_KEY` = your OpenAI API key
+- `OPENAI_MODEL` = `gpt-4.1-mini` (or another Responses API model available to your account)
+- `AI_SEARCH_TIMEOUT` = `35`
+
+If no AI key is configured, the module attempts public Wikipedia/Google discovery as a fallback; those fallbacks are best-effort and do not access the bot's Media collection.
