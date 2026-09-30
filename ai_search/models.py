@@ -8,6 +8,7 @@ class SearchIntent:
     normalized_query: str = ""
     title: Optional[str] = None
     person: Optional[str] = None
+    persons: List[str] = field(default_factory=list)
     person_type: Optional[str] = None
     language: Optional[str] = None
     year: Optional[int] = None
