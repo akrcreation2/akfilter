@@ -16,7 +16,8 @@ from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerId
 from utils import get_size, is_subscribed, get_poster, search_gagala, temp, get_settings, save_group_settings, create_invite_links, get_shortlink, check_verification, get_token
 from database.users_chats_db import db
 from info import HYPER_MODE
-from database.ia_filterdb import Media, get_file_details, get_search_results
+from database.ia_filterdb import Media, get_file_details
+from ai_search.integration import ai_aware_search
 from database.filters_mdb import (
     del_all,
     find_filter,
@@ -54,7 +55,7 @@ async def next_page(bot, query):
         await query.answer(script.OLD_MES, show_alert=True)
         return
 
-    files, n_offset, total = await get_search_results(search, offset=offset, filter=True)
+    files, n_offset, total = await ai_aware_search(search, offset=offset, filter=True)
     try:
         n_offset = int(n_offset)
     except:
@@ -155,7 +156,7 @@ async def advantage_spoll_choker(bot, query):
     await query.answer(script.CHK_MOV_ALRT)#script change
     k = await manual_filters(bot, query.message, text=movie)
     if k == False:
-        files, offset, total_results = await get_search_results(movie, offset=0, filter=True)
+        files, offset, total_results = await ai_aware_search(movie, offset=0, filter=True)
         if files:
             k = (movie, files, offset, total_results)
             await auto_filter(bot, query, k)
@@ -711,7 +712,7 @@ async def auto_filter(client, msg, spoll=False):
             return
         if 2 < len(message.text) < 100:
             search = message.text
-            files, offset, total_results = await get_search_results(search.lower(), offset=0, filter=True)
+            files, offset, total_results = await ai_aware_search(search.lower(), offset=0, filter=True)
             if not files:
                 if settings["spell_check"]:
                     return await advantage_spell_chok(client, msg)
