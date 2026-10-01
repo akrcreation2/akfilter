@@ -74,19 +74,15 @@ No MongoDB schema, database permissions, Koyeb configuration, Dockerfile, Procfi
 
 ## AI Movie Discovery Update
 
-The AI discovery stage is now separate from the Media/file database.
+The discovery stage is now API-key-free and external-source-first.
 
 Flow:
-1. User sends a natural-language movie/person/song query.
-2. `ai_search.discovery` uses OpenAI Responses + web search when `OPENAI_API_KEY` is configured.
-3. The bot shows discovered movie titles/years as Telegram buttons.
-4. The Media database is NOT queried during discovery.
-5. Only after a user clicks a movie button does the existing `get_search_results()` file search run.
-6. Existing file buttons/Get File flow remains in place.
+1. User sends a normal movie/person/natural-language query.
+2. `ai_search.discovery` resolves people and movie information from public external sources.
+3. Structured relationship queries use Wikidata; Wikipedia and DuckDuckGo are fallbacks.
+4. The bot shows discovered movie titles/years as Telegram buttons.
+5. The Media database is NOT queried during discovery.
+6. Only after a user clicks a movie button does the existing file search run.
+7. If discovery returns nothing, the original file search is used as a compatibility fallback.
 
-Recommended Koyeb environment variables:
-- `OPENAI_API_KEY` = your OpenAI API key
-- `OPENAI_MODEL` = `gpt-4.1-mini` (or another Responses API model available to your account)
-- `AI_SEARCH_TIMEOUT` = `35`
-
-If no AI key is configured, the module attempts public Wikipedia/Google discovery as a fallback; those fallbacks are best-effort and do not access the bot's Media collection.
+No `OPENAI_API_KEY` or other AI API key is required. Discovery caching and bounded network timeouts are configurable with `AI_DISCOVERY_CACHE_DIR`, `AI_DISCOVERY_CACHE_TTL`, `AI_DISCOVERY_NETWORK_TIMEOUT`, and `AI_DISCOVERY_TIMEOUT`.
