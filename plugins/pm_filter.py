@@ -840,6 +840,11 @@ async def auto_filter(client, msg, spoll=False):
             # public/AI metadata and DOES NOT touch Media until a title button
             # is clicked. Technical/file-oriented queries retain the existing
             # search path unchanged.
+            # Discovery-first for normal movie/person prose. The discovery layer
+            # uses public external sources only; it never reads Media here.
+            # Technical/file queries (720p, 1GB, S01E02, etc.) keep the fast
+            # legacy database path unchanged. If public discovery returns nothing,
+            # fall back to the existing search so old queries continue to work.
             if looks_like_discovery_query(search):
                 shown = await _show_ai_discovery(client, message, search)
                 if shown:
