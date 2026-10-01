@@ -21,7 +21,6 @@ httpx[http2]
 itsdangerous>=2.0.0
 jinja2
 NumPy
-openai>=0.25.0
 opencv-python-headless>=4.7.0.68
 Pillow>=9.4.0
 psutil>=5.9.0
