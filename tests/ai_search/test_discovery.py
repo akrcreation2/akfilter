@@ -6,6 +6,12 @@ class DiscoveryTests(unittest.TestCase):
     def test_person_movie_query_is_discovery(self):
         self.assertTrue(looks_like_discovery_query("Duniya Vijay movies"))
 
+    def test_plain_person_query_is_discovery_first(self):
+        self.assertTrue(looks_like_discovery_query("Duniya Vijay"))
+
+    def test_movie_title_query_is_discovery_first(self):
+        self.assertTrue(looks_like_discovery_query("Yajamana"))
+
     def test_long_natural_language_query_is_discovery(self):
         self.assertTrue(looks_like_discovery_query(
             "Find Kannada movies where the hero and heroine acted together after 2015 "
