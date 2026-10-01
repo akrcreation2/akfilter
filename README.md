@@ -113,6 +113,10 @@ python3 bot.py</pre>
 
 ## AI Movie Discovery
 
-AI discovery is intentionally separate from file search. Configure `OPENAI_API_KEY` in the deployment environment to enable the primary OpenAI web-search path. Optional settings are `OPENAI_MODEL` (default `gpt-4.1-mini`) and `AI_SEARCH_TIMEOUT` (default `35`).
+Movie discovery is separate from file search and does not require a paid AI API key. Normal movie/person/natural-language requests are searched against public external sources first: Wikidata structured data, Wikipedia search, and DuckDuckGo web search.
 
-A discovery request such as `Duniya Vijay movies` first produces movie-name/year buttons from public movie information. The bot does not inspect its MongoDB Media collection at this stage. The existing file database is queried only after the user clicks a movie button.
+For example, `Duniya Vijay movies` resolves the person from public data and retrieves movie titles/years. A multi-person query can use public cast relationships to find movies where the requested people acted together. Language/year constraints are applied when the public metadata contains them.
+
+The bot does **not** inspect its MongoDB Media collection during discovery. It shows the discovered movie names as Telegram buttons. The existing Media/file database is queried only after the user clicks a movie button. If public discovery cannot produce a result, the original file search remains as a fallback.
+
+Optional settings: `AI_DISCOVERY_CACHE_DIR`, `AI_DISCOVERY_CACHE_TTL`, `AI_DISCOVERY_NETWORK_TIMEOUT`, and `AI_DISCOVERY_TIMEOUT`.
