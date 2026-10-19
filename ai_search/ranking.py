@@ -11,10 +11,38 @@ def similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, fold(a), fold(b)).ratio() if a and b else 0.0
 
 
+def _as_text_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    try:
+        return [str(item) for item in value if item]
+    except TypeError:
+        return [str(value)]
+
+
+def title_similarity(query: str, candidate: str) -> float:
+    """Combine whole-string and token-level similarity for noisy filenames."""
+    whole = similarity(query, candidate)
+    query_tokens = fold(query).split()
+    candidate_tokens = fold(candidate).split()
+    if not query_tokens or not candidate_tokens:
+        return whole
+    token_scores = []
+    for token in query_tokens:
+        best = max((SequenceMatcher(None, token, other).ratio() for other in candidate_tokens), default=0.0)
+        token_scores.append(best)
+    coverage = sum(token_scores) / len(token_scores)
+    # Whole-title similarity protects against accidental single-token matches;
+    # token coverage helps when filenames append language, year, resolution, etc.
+    return max(whole, coverage * 0.92)
+
+
 def rank_result(result: SearchResult, intent: SearchIntent, weights: RankingWeights = RankingWeights()) -> float:
     score = 0.0
-    score += weights.title * similarity(intent.title or intent.normalized_query, result.title)
-    person_text = " ".join(map(str, result.metadata.get("actors", []) + result.metadata.get("cast", [])))
+    score += weights.title * title_similarity(intent.title or intent.normalized_query, result.title)
+    person_text = " ".join(_as_text_list(result.metadata.get("actors")) + _as_text_list(result.metadata.get("cast")))
     if intent.person: score += weights.person * similarity(intent.person, person_text)
     if intent.language: score += weights.language * (1 if fold(intent.language) == fold(result.language or "") else 0)
     if intent.year is not None: score += weights.year * (1 if intent.year == result.year else 0)
