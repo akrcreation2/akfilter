@@ -5,10 +5,13 @@ from typing import Iterable, Optional
 
 LANGUAGE_ALIASES = {
     "kannada": "Kannada", "kannad": "Kannada", "ಕನ್ನಡ": "Kannada", "ಕನ್ನಡದ": "Kannada",
-    "kan": "Kannada", "english": "English", "hindi": "Hindi", "हिंदी": "Hindi",
-    "tamil": "Tamil", "தமிழ்": "Tamil", "telugu": "Telugu", "తెలుగు": "Telugu",
-    "malayalam": "Malayalam", "മലയാളം": "Malayalam", "marathi": "Marathi", "मराठी": "Marathi",
-    "bengali": "Bengali", "বাংলা": "Bengali", "punjabi": "Punjabi", "ਪੰਜਾਬੀ": "Punjabi",
+    "kan": "Kannada", "kann": "Kannada", "kannda": "Kannada",
+    "english": "English", "eng": "English", "en": "English",
+    "hindi": "Hindi", "hind": "Hindi", "hin": "Hindi", "hndi": "Hindi", "हिंदी": "Hindi",
+    "tamil": "Tamil", "tam": "Tamil", "tamill": "Tamil", "தமிழ்": "Tamil",
+    "telugu": "Telugu", "tel": "Telugu", "telgu": "Telugu", "తెలుగు": "Telugu",
+    "malayalam": "Malayalam", "malaylam": "Malayalam", "malayalm": "Malayalam", "mal": "Malayalam", "മലയാളം": "Malayalam", "marathi": "Marathi", "mar": "Marathi", "मराठी": "Marathi",
+    "bengali": "Bengali", "bangla": "Bengali", "বাংলা": "Bengali", "punjabi": "Punjabi", "ਪੰਜਾਬੀ": "Punjabi",
     "gujarati": "Gujarati", "ગુજરાતી": "Gujarati", "urdu": "Urdu", "اردو": "Urdu",
 }
 LANGUAGE_WORDS = set(LANGUAGE_ALIASES)
