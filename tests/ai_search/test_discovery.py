@@ -1,5 +1,5 @@
 import unittest
-from ai_search.discovery import MovieCandidate, _parse_json_candidates, looks_like_discovery_query
+from ai_search.discovery import (MovieCandidate, _parse_json_candidates, looks_like_discovery_query, _person_hint_from_natural_query, _person_query_role)
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -27,6 +27,27 @@ class DiscoveryTests(unittest.TestCase):
     def test_file_query_stays_legacy(self):
         self.assertFalse(looks_like_discovery_query("Yajamana 2019 720p"))
 
+
+    def test_natural_actor_question_extracts_name(self):
+        self.assertEqual(_person_hint_from_natural_query("Yash acted in which movies"), "yash")
+
+    def test_director_query_extracts_name(self):
+        self.assertEqual(_person_hint_from_natural_query("Rishab Shetty direction movies"), "rishab shetty")
+        self.assertEqual(_person_query_role("Rishab Shetty direction movies"), "director")
+
+    def test_actor_query_defaults_to_cast(self):
+        self.assertEqual(_person_query_role("Yash movies"), "cast")
+
+    def test_natural_actor_question_extracts_name(self):
+        self.assertEqual(_person_hint_from_natural_query("Yash acted in which movies"), "Yash")
+
+    def test_director_query_extracts_name(self):
+        self.assertEqual(_person_hint_from_natural_query("Rishab Shetty direction movies"), "Rishab Shetty")
+        self.assertEqual(_person_query_role("Rishab Shetty direction movies"), "director")
+
+    def test_actor_query_defaults_to_cast(self):
+        self.assertEqual(_person_query_role("Yash movies"), "cast")
+
     def test_json_candidate_parser(self):
         results = _parse_json_candidates(
             '{"movies":[{"title":"Salaga","year":2021},{"title":"Duniya","year":2007}]}'
@@ -36,3 +57,4 @@ class DiscoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    
