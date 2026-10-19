@@ -16,7 +16,7 @@ from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerId
 from utils import get_size, is_subscribed, get_poster, search_gagala, temp, get_settings, save_group_settings, create_invite_links, get_shortlink, check_verification, get_token
 from database.users_chats_db import db
 from info import HYPER_MODE
-from database.ia_filterdb import Media, get_file_details, get_search_results
+from database.ia_filterdb import Media, get_file_details, get_search_results, record_movie_search, get_most_searched_movies, get_recent_movie_titles
 from ai_search.integration import ai_aware_search
 from ai_search.discovery import discover_movies_with_timeout, looks_like_discovery_query
 from ai_search.discovery_store import get as get_discovery, put as put_discovery
@@ -237,81 +237,6 @@ async def advantage_spoll_choker(bot, query):
 
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
-    # Result-screen controls: keep all filtering on the existing file-search API.
-    if query.data.startswith("langmenu#") or query.data.startswith("qualitymenu#"):
-        action, key = query.data.split("#", 1)
-        if not BUTTONS.get(key):
-            return await query.answer("This search has expired. Please search again.", show_alert=True)
-        if action == "langmenu":
-            choices = ["Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "English", "Bengali", "Marathi", "Punjabi", "Other"]
-            buttons = [[InlineKeyboardButton(name, callback_data=f"applylang#{key}#{name}")] for name in choices]
-            buttons.append([InlineKeyboardButton("↩ Back to Results", callback_data=f"backresults#{key}")])
-            await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
-        else:
-            choices = ["2160p", "1440p", "1080p", "720p", "540p", "480p", "360p", "Other"]
-            buttons = [[InlineKeyboardButton(name, callback_data=f"applyquality#{key}#{name}")] for name in choices]
-            buttons.append([InlineKeyboardButton("↩ Back to Results", callback_data=f"backresults#{key}")])
-            await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
-        return await query.answer()
-    elif query.data.startswith("applylang#") or query.data.startswith("applyquality#"):
-        action, key, value = query.data.split("#", 2)
-        base_query = BUTTONS.get(key)
-        if not base_query:
-            return await query.answer("This search has expired. Please search again.", show_alert=True)
-        term = value if value != "Other" else ("other language" if action == "applylang" else "other quality")
-        refined = f"{base_query} {term}".strip()
-        files, offset, total = await ai_aware_search(refined, offset=0, filter=True)
-        if not files:
-            return await query.answer(f"No files found for {value}.", show_alert=True)
-        BUTTONS[key] = refined
-        settings = await get_settings(query.message.chat.id)
-        pre = 'filep' if settings['file_secure'] else 'file'
-        rows = [[InlineKeyboardButton(f"📂[{get_size(f.file_size)}] ➵ {f.file_name}"[:60], callback_data=f"{pre}#{f.file_id}")] for f in files]
-        if offset:
-            rows.append([InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{query.from_user.id}_{key}_{offset}")])
-        rows.append([InlineKeyboardButton("↩ Back to Results", callback_data=f"backresults#{key}")])
-        await query.message.edit_text(f"🎬 Results filtered by {value}\n\n" + "\n".join(f"• {f.file_name}" for f in files), reply_markup=InlineKeyboardMarkup(rows))
-        return await query.answer()
-    elif query.data.startswith("backresults#"):
-        key = query.data.split("#", 1)[1]
-        search = BUTTONS.get(key)
-        if not search:
-            return await query.answer("This search has expired. Please search again.", show_alert=True)
-        files, offset, total = await ai_aware_search(search, offset=0, filter=True)
-        if not files:
-            return await query.answer("No files found.", show_alert=True)
-        settings = await get_settings(query.message.chat.id)
-        pre = 'filep' if settings['file_secure'] else 'file'
-        rows = [[InlineKeyboardButton(f"📂[{get_size(f.file_size)}] ➵ {f.file_name}"[:60], callback_data=f"{pre}#{f.file_id}")] for f in files]
-        rows.append([InlineKeyboardButton("📤 SEND ALL", callback_data=f"sendall#{key}"), InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"langmenu#{key}"), InlineKeyboardButton("🎞 QUALITY", callback_data=f"qualitymenu#{key}")])
-        if offset:
-            rows.append([InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{query.from_user.id}_{key}_{offset}")])
-        await query.message.edit_text(f"🎬 Results for: {search}\n\n" + "\n".join(f"• {f.file_name}" for f in files), reply_markup=InlineKeyboardMarkup(rows))
-        return await query.answer()
-    elif query.data.startswith("sendall#"):
-        key = query.data.split("#", 1)[1]
-        search = BUTTONS.get(key)
-        if not search:
-            return await query.answer("This search has expired. Please search again.", show_alert=True)
-        files, _, total = await ai_aware_search(search, max_results=50, offset=0, filter=True)
-        if not files:
-            return await query.answer("No files found.", show_alert=True)
-        await query.answer(f"Sending up to {len(files)} files…")
-        sent = 0
-        for item in files:
-            try:
-                await client.send_cached_media(query.message.chat.id, item.file_id)
-                sent += 1
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                try:
-                    await client.send_cached_media(query.message.chat.id, item.file_id)
-                    sent += 1
-                except Exception:
-                    continue
-            except Exception:
-                continue
-        return await query.message.reply_text(f"📤 Sent {sent} of {min(total, 50)} files.\nUse a more specific query if you need a smaller set.")
     if query.data.startswith("aidiscpage:"):
         _, token, offset = query.data.split(":", 2)
         try:
@@ -911,6 +836,10 @@ async def auto_filter(client, msg, spoll=False):
         # requests.  Commands/empty messages are still ignored above.
         if 2 < len(message.text) <= 4000:
             search = message.text.strip()
+            try:
+                await record_movie_search(search)
+            except Exception:
+                logger.exception("Search analytics update failed")
             # Discovery is a separate first stage. It finds movie titles from
             # public/AI metadata and DOES NOT touch Media until a title button
             # is clicked. Technical/file-oriented queries retain the existing
@@ -938,8 +867,6 @@ async def auto_filter(client, msg, spoll=False):
         search, files, offset, total_results = spoll
 
     pre = 'filep' if settings['file_secure'] else 'file'
-    key = f"{message.chat.id}-{message.id}"
-    BUTTONS[key] = search
 
     if HYPER_MODE:
         cap_lines = []
@@ -994,12 +921,6 @@ async def auto_filter(client, msg, spoll=False):
         else:
             btn.append([InlineKeyboardButton(text="📃 1/1", callback_data="pages")])
             
-    btn.append([
-        InlineKeyboardButton("📤 SEND ALL", callback_data=f"sendall#{key}"),
-        InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"langmenu#{key}"),
-        InlineKeyboardButton("🎞 QUALITY", callback_data=f"qualitymenu#{key}"),
-    ])
-
     imdb = await get_poster(search, file=(files[0]).file_name) if settings["imdb"] else None
     TEMPLATE = settings['template']
     if imdb:
@@ -1205,3 +1126,53 @@ async def manual_filters(client, message, text=False):
                 break
     else:
         return False
+
+
+# Optional discovery panel. This is additive; the existing start/search handlers remain unchanged.
+async def _movie_home_markup():
+    from datetime import datetime
+    popular = await get_most_searched_movies(10)
+    recent = await get_recent_movie_titles(10)
+    year_now = datetime.now().year
+    current_year = [m for m in recent if m.get("year") == year_now]
+    chosen = current_year if current_year else recent
+    rows = []
+    if popular:
+        rows.append([InlineKeyboardButton("🔥 MOST SEARCHED", callback_data="moviehome:noop")])
+        for item in popular[:10]:
+            title = item.get("title", "")
+            rows.append([InlineKeyboardButton(f"{title[:48]} · {item.get('count', 0)}", callback_data=f"moviehome:search:{title[:45]}")])
+    if chosen:
+        rows.append([InlineKeyboardButton("🎬 RECENT MOVIES", callback_data="moviehome:noop")])
+        for i in range(0, min(len(chosen), 10), 2):
+            pair = chosen[i:i+2]
+            row = []
+            for movie in pair:
+                title = movie["title"]
+                year = movie.get("year")
+                label = f"{title} ({year})" if year else title
+                row.append(InlineKeyboardButton(label[:32], callback_data=f"moviehome:search:{title[:45]}"))
+            rows.append(row)
+    if not rows:
+        rows = [[InlineKeyboardButton("No indexed movies yet", callback_data="moviehome:noop")]]
+    return InlineKeyboardMarkup(rows), "🎬 <b>Movie Hub</b>\n\n🔥 Most searched movies and recently indexed titles.\nRecent release year is inferred from indexed filenames when available."
+
+@Client.on_message(filters.command(["moviehub", "popular"]) & filters.incoming)
+async def movie_discovery_home(client, message):
+    markup, text = await _movie_home_markup()
+    await message.reply_text(text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+
+@Client.on_callback_query(filters.regex(r"^moviehome:"))
+async def movie_home_callback(client, query):
+    data = query.data.split(":", 2)
+    action = data[1] if len(data) > 1 else "noop"
+    if action == "noop":
+        return await query.answer()
+    if action == "search" and len(data) > 2:
+        title = data[2]
+        await query.answer(f"Searching {title}")
+        try:
+            await auto_filter(client, query.message, title)
+        except Exception:
+            logger.exception("Movie hub search failed")
+            await query.message.reply_text("Search failed. Please try the title manually.")
