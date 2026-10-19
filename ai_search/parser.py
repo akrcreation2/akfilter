@@ -195,10 +195,17 @@ class QueryParser:
         reserved = set(LANGUAGE_ALIASES) | {
             "movie", "movies", "film", "films", "cinema", "ಚಿತ್ರ", "ಸಿನಿಮಾ",
             "ಚಿತ್ರಗಳು", "series", "show", "season", "episode", "around",
-            "from", "latest", "new", "newest", "recent", "this", "current", "last", "previous", "year", "and", "or",
-            "avara", "ಅವರ", "acted", "acting", "actor", "actress", "hero",
-            "heroine", "cast", "starring", "filmography", "find", "show",
-            "give", "send", "me", "all", "available", "files", "file",
+            "from", "latest", "new", "newest", "recent", "this", "current",
+            "last", "previous", "year", "and", "or", "avara", "ಅವರ",
+            "acted", "acting", "actor", "actress", "hero", "heroine", "cast",
+            "starring", "filmography", "find", "please", "show", "give", "send",
+            "me", "all", "available", "files", "file", "small", "smallest",
+            "largest", "large", "big", "high", "low", "size", "prefer",
+            "only", "actually", "present", "database", "in", "on", "with",
+            "for", "by", "of", "the", "a", "an", "want", "need", "download",
+            "quality", "resolution", "full", "hd", "fhd", "uhd", "4k",
+            "2160p", "1440p", "1080p", "1080", "720p", "720", "576p",
+            "480p", "480", "360p", "360", "random", "hindi", "english",
         }
 
         # First classify explicit person/movie entities.
@@ -219,11 +226,22 @@ class QueryParser:
                 intent.title = entity
                 break
 
-        if not intent.person and not intent.title and len(corrected.split()) <= 8:
-            candidate = normalize_title(" ".join(
-                x for x in corrected.split()
+        if not intent.person and not intent.title and len(corrected.split()) <= 12:
+            # Strip query constraints before inferring the title. This is important
+            # for queries such as "Kantara Kannada 1080p 1GB": quality/size must
+            # affect ranking, not become part of the movie title.
+            candidate_text = corrected
+            candidate_text = re.sub(r"(?<!\w)\d+(?:\.\d+)?\s*(?:tb|gb|mb|kb|g|m|k|b)\b", " ", candidate_text, flags=re.I)
+            candidate_text = re.sub(r"(?<!\d)(?:19|20)\d{2}(?!\d)", " ", candidate_text)
+            candidate_text = re.sub(r"(?<!\d)\d{3,5}\s*[x×]\s*\d{3,5}(?!\d)", " ", candidate_text)
+            candidate_text = re.sub(r"\b(?:4k|uhd|fhd|full\s*hd|hd|2160p?|1440p?|1080p?|720p?|576p?|480p?|360p?)\b", " ", candidate_text, flags=re.I)
+            candidate_text = re.sub(r"\b(?:s(?:eason)?\s*\d+|e(?:p(?:isode)?)?\s*\d+|\d+\s*x\s*\d+)\b", " ", candidate_text, flags=re.I)
+            candidate_words = [
+                x for x in candidate_text.split()
                 if x not in reserved and not x.isdigit()
-            ))
+                and not re.fullmatch(r"(?:19|20)\d{2}", x)
+            ]
+            candidate = normalize_title(" ".join(candidate_words))
             if candidate:
                 intent.title = candidate
 
@@ -233,7 +251,11 @@ class QueryParser:
         for p in intent.persons:
             person_tokens.update(fold(p).split())
         for x in corrected.split():
-            if x in reserved or x.isdigit() or x in person_tokens:
+            if (x in reserved or x.isdigit() or x in person_tokens
+                    or re.fullmatch(r"(?:19|20)\d{2}", x)
+                    or re.fullmatch(r"\d+(?:\.\d+)?(?:tb|gb|mb|kb|g|m|k|b)", x)
+                    or re.fullmatch(r"(?:2160|1440|1080|720|576|480|360)p?", x)
+                    or re.fullmatch(r"\d{3,5}[x×]\d{3,5}", x)):
                 continue
             if len(x) >= 2:
                 keywords.append(x)
