@@ -25,6 +25,21 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(intent.person, "Darshan"); self.assertEqual(intent.language, "Kannada")
         self.assertEqual(intent.year, 2015); self.assertEqual(intent.target_size_mb, 400); self.assertEqual(intent.quality, "1080p")
         self.assertTrue(intent.corrections)
+
+    def test_title_is_separated_from_quality_and_size(self):
+        intent = self.parser.parse("Kantara Kannada 1080p 1GB")
+        self.assertEqual(intent.title, "Kantara")
+        self.assertEqual(intent.quality, "1080p")
+        self.assertEqual(intent.language, "Kannada")
+        self.assertEqual(intent.target_size_mb, 1024)
+        self.assertNotIn("1080p", intent.keywords)
+        self.assertNotIn("1gb", intent.keywords)
+
+    def test_common_language_shortcuts_and_typos(self):
+        for query in ("KGF hind 1080p", "KGF kannda 720p", "KGF telgu 480p"):
+            intent = self.parser.parse(query)
+            self.assertIn(intent.language, {"Hindi", "Kannada", "Telugu"})
+
     def test_series_markers(self):
         self.assertEqual(self.parser.parse("Series S02").season, 2)
         self.assertEqual(self.parser.parse("Series episode 5").episode, 5)
