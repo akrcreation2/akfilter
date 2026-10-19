@@ -131,6 +131,118 @@ def _year_from_text(text: str) -> Optional[int]:
     return None
 
 
+
+# ---------------------------------------------------------------------------
+# TMDB global movie/person metadata (optional credentials; no AI API required)
+# ---------------------------------------------------------------------------
+_TMDB_BASE = "https://api.themoviedb.org/3"
+_TMDB_LANGUAGE_CODES = {
+    "kannada": "kn", "telugu": "te", "tamil": "ta", "malayalam": "ml",
+    "hindi": "hi", "english": "en", "bengali": "bn", "marathi": "mr",
+    "punjabi": "pa", "gujarati": "gu", "urdu": "ur", "japanese": "ja",
+    "korean": "ko", "chinese": "zh", "french": "fr", "spanish": "es",
+    "german": "de", "italian": "it", "portuguese": "pt", "russian": "ru",
+}
+
+def _tmdb_enabled() -> bool:
+    return bool(os.getenv("TMDB_ACCESS_TOKEN", "").strip() or os.getenv("TMDB_API_KEY", "").strip())
+
+def _tmdb_json(path: str, params: Optional[dict] = None):
+    """Call TMDB using an environment token/key; never hard-code credentials."""
+    token = os.getenv("TMDB_ACCESS_TOKEN", "").strip()
+    key = os.getenv("TMDB_API_KEY", "").strip()
+    query = dict(params or {})
+    if token:
+        url = _TMDB_BASE + path
+        req = Request(url + ("?" + urlencode(query) if query else ""), headers={
+            "Authorization": "Bearer " + token,
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        })
+        with urlopen(req, timeout=NETWORK_TIMEOUT) as response:
+            return json.loads(response.read().decode("utf-8", errors="replace"))
+    if key:
+        query["api_key"] = key
+        return _get_json(_TMDB_BASE + path, query)
+    return {}
+
+def _tmdb_movie_items(items, limit=MAX_RESULTS, source="tmdb"):
+    out = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or item.get("name") or item.get("original_title")
+        date = item.get("release_date") or item.get("first_air_date") or ""
+        year = None
+        if isinstance(date, str) and re.match(r"^\d{4}", date):
+            try: year = int(date[:4])
+            except ValueError: pass
+        if title:
+            out.append(MovieCandidate(title=str(title), year=year, source=source))
+    return _dedupe(out, limit)
+
+def _tmdb_search_sync(query: str, limit=MAX_RESULTS) -> List[MovieCandidate]:
+    """Search global TMDB movie metadata with optional year/language constraints."""
+    if not _tmdb_enabled():
+        return []
+    year, year_range, language = _query_constraints(query)
+    clean = re.sub(r"\b(?:kannada|kannad|telugu|tamil|malayalam|hindi|english|bengali|marathi|punjabi|gujarati|urdu)\b", " ", query, flags=re.I)
+    clean = re.sub(r"\b(?:movies?|films?|filmography|show|list|find|give|me|all|please|of|by|with|acted|in|which|directed|direction)\b", " ", clean, flags=re.I)
+    clean = re.sub(r"\b(?:19\d{2}|20\d{2})\b", " ", clean)
+    clean = re.sub(r"\s+", " ", clean).strip(" ,.-") or query.strip()
+    params = {"query": clean, "include_adult": "false", "page": 1}
+    if year:
+        params["year"] = year
+    elif year_range:
+        params["primary_release_date.gte"] = f"{min(year_range):04d}-01-01"
+        params["primary_release_date.lte"] = f"{max(year_range):04d}-12-31"
+    # Do not force a translated UI language; search across original/translated titles.
+    data = _tmdb_json("/search/movie", params)
+    items = data.get("results", []) if isinstance(data, dict) else []
+    candidates = _tmdb_movie_items(items, limit)
+    if language:
+        code = _TMDB_LANGUAGE_CODES.get(language.casefold())
+        if code:
+            # Prefer language matches, but keep title matches if metadata lacks a language.
+            matched = []
+            for item in items:
+                if item.get("original_language") == code:
+                    matched.extend(_tmdb_movie_items([item], limit))
+            if matched:
+                candidates = _dedupe(matched, limit)
+    return candidates
+
+def _tmdb_person_films_sync(person: str, limit=MAX_RESULTS, role="cast") -> List[MovieCandidate]:
+    if not _tmdb_enabled() or not person:
+        return []
+    data = _tmdb_json("/search/person", {"query": person, "include_adult": "false", "page": 1})
+    people = data.get("results", []) if isinstance(data, dict) else []
+    if not people:
+        return []
+    person_id = people[0].get("id")
+    if not person_id:
+        return []
+    credits = _tmdb_json(f"/person/{person_id}/movie_credits", {})
+    key = "crew" if role in ("director", "producer") else "cast"
+    items = credits.get(key, []) if isinstance(credits, dict) else []
+    if role == "director":
+        items = [x for x in items if x.get("job") == "Director"]
+    elif role == "producer":
+        items = [x for x in items if x.get("job") == "Producer"]
+    year, year_range, language = _query_constraints(person)
+    if year:
+        items = [x for x in items if str(x.get("release_date", "")).startswith(str(year))]
+    elif year_range:
+        items = [x for x in items if (lambda d: len(d) >= 4 and str(min(year_range)) <= d[:4] <= str(max(year_range)))(str(x.get("release_date", "")))]
+    if language:
+        code = _TMDB_LANGUAGE_CODES.get(language.casefold())
+        if code:
+            matches = [x for x in items if x.get("original_language") == code]
+            if matches: items = matches
+    items.sort(key=lambda x: x.get("release_date") or "", reverse=True)
+    return _tmdb_movie_items(items, limit)
+
+
 # ---------------------------------------------------------------------------
 # Wikidata
 # ---------------------------------------------------------------------------
@@ -615,6 +727,10 @@ def _discover_sync(query: str, limit: int = MAX_RESULTS) -> List[MovieCandidate]
         )
         if movies:
             return _dedupe(movies, limit)
+        # TMDB is a structured fallback for people whose Wikidata filmography is incomplete.
+        tmdb_movies = _tmdb_person_films_sync(person_hint or people[0][1], limit=limit, role=role)
+        if tmdb_movies:
+            return _dedupe(tmdb_movies, limit)
         # Person queries should not fall through to generic web results, which
         # previously turned unrelated page titles into movie suggestions.
         return []
@@ -628,7 +744,13 @@ def _discover_sync(query: str, limit: int = MAX_RESULTS) -> List[MovieCandidate]
         if movies:
             return _dedupe(movies, limit)
 
-    # 2) Wikipedia public search for title/topic queries and when Wikidata has
+    # 2) TMDB global movie metadata search (optional). It is structured and
+    # supports original/translated titles across many languages.
+    tmdb_movies = _tmdb_search_sync(query, limit=limit)
+    if tmdb_movies:
+        return _dedupe(tmdb_movies, limit)
+
+    # 3) Wikipedia public search for title/topic queries and when Wikidata has
     # incomplete cast/release metadata.
     wiki_queries = [query]
     if person_hint:
@@ -638,7 +760,7 @@ def _discover_sync(query: str, limit: int = MAX_RESULTS) -> List[MovieCandidate]
         if movies:
             return _dedupe(movies, limit)
 
-    # 3) Broad web search fallback. This is deliberately after structured
+    # 4) Broad web search fallback. This is deliberately after structured
     # sources so arbitrary prose remains quick for common actor queries.
     results = _duckduckgo_search_sync(query, limit=12)
     out = []
