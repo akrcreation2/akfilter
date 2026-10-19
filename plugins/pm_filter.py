@@ -237,6 +237,81 @@ async def advantage_spoll_choker(bot, query):
 
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
+    # Result-screen controls: keep all filtering on the existing file-search API.
+    if query.data.startswith("langmenu#") or query.data.startswith("qualitymenu#"):
+        action, key = query.data.split("#", 1)
+        if not BUTTONS.get(key):
+            return await query.answer("This search has expired. Please search again.", show_alert=True)
+        if action == "langmenu":
+            choices = ["Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "English", "Bengali", "Marathi", "Punjabi", "Other"]
+            buttons = [[InlineKeyboardButton(name, callback_data=f"applylang#{key}#{name}")] for name in choices]
+            buttons.append([InlineKeyboardButton("↩ Back to Results", callback_data=f"backresults#{key}")])
+            await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+        else:
+            choices = ["2160p", "1440p", "1080p", "720p", "540p", "480p", "360p", "Other"]
+            buttons = [[InlineKeyboardButton(name, callback_data=f"applyquality#{key}#{name}")] for name in choices]
+            buttons.append([InlineKeyboardButton("↩ Back to Results", callback_data=f"backresults#{key}")])
+            await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+        return await query.answer()
+    elif query.data.startswith("applylang#") or query.data.startswith("applyquality#"):
+        action, key, value = query.data.split("#", 2)
+        base_query = BUTTONS.get(key)
+        if not base_query:
+            return await query.answer("This search has expired. Please search again.", show_alert=True)
+        term = value if value != "Other" else ("other language" if action == "applylang" else "other quality")
+        refined = f"{base_query} {term}".strip()
+        files, offset, total = await ai_aware_search(refined, offset=0, filter=True)
+        if not files:
+            return await query.answer(f"No files found for {value}.", show_alert=True)
+        BUTTONS[key] = refined
+        settings = await get_settings(query.message.chat.id)
+        pre = 'filep' if settings['file_secure'] else 'file'
+        rows = [[InlineKeyboardButton(f"📂[{get_size(f.file_size)}] ➵ {f.file_name}"[:60], callback_data=f"{pre}#{f.file_id}")] for f in files]
+        if offset:
+            rows.append([InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{query.from_user.id}_{key}_{offset}")])
+        rows.append([InlineKeyboardButton("↩ Back to Results", callback_data=f"backresults#{key}")])
+        await query.message.edit_text(f"🎬 Results filtered by {value}\n\n" + "\n".join(f"• {f.file_name}" for f in files), reply_markup=InlineKeyboardMarkup(rows))
+        return await query.answer()
+    elif query.data.startswith("backresults#"):
+        key = query.data.split("#", 1)[1]
+        search = BUTTONS.get(key)
+        if not search:
+            return await query.answer("This search has expired. Please search again.", show_alert=True)
+        files, offset, total = await ai_aware_search(search, offset=0, filter=True)
+        if not files:
+            return await query.answer("No files found.", show_alert=True)
+        settings = await get_settings(query.message.chat.id)
+        pre = 'filep' if settings['file_secure'] else 'file'
+        rows = [[InlineKeyboardButton(f"📂[{get_size(f.file_size)}] ➵ {f.file_name}"[:60], callback_data=f"{pre}#{f.file_id}")] for f in files]
+        rows.append([InlineKeyboardButton("📤 SEND ALL", callback_data=f"sendall#{key}"), InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"langmenu#{key}"), InlineKeyboardButton("🎞 QUALITY", callback_data=f"qualitymenu#{key}")])
+        if offset:
+            rows.append([InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{query.from_user.id}_{key}_{offset}")])
+        await query.message.edit_text(f"🎬 Results for: {search}\n\n" + "\n".join(f"• {f.file_name}" for f in files), reply_markup=InlineKeyboardMarkup(rows))
+        return await query.answer()
+    elif query.data.startswith("sendall#"):
+        key = query.data.split("#", 1)[1]
+        search = BUTTONS.get(key)
+        if not search:
+            return await query.answer("This search has expired. Please search again.", show_alert=True)
+        files, _, total = await ai_aware_search(search, max_results=50, offset=0, filter=True)
+        if not files:
+            return await query.answer("No files found.", show_alert=True)
+        await query.answer(f"Sending up to {len(files)} files…")
+        sent = 0
+        for item in files:
+            try:
+                await client.send_cached_media(query.message.chat.id, item.file_id)
+                sent += 1
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                try:
+                    await client.send_cached_media(query.message.chat.id, item.file_id)
+                    sent += 1
+                except Exception:
+                    continue
+            except Exception:
+                continue
+        return await query.message.reply_text(f"📤 Sent {sent} of {min(total, 50)} files.\nUse a more specific query if you need a smaller set.")
     if query.data.startswith("aidiscpage:"):
         _, token, offset = query.data.split(":", 2)
         try:
@@ -863,6 +938,8 @@ async def auto_filter(client, msg, spoll=False):
         search, files, offset, total_results = spoll
 
     pre = 'filep' if settings['file_secure'] else 'file'
+    key = f"{message.chat.id}-{message.id}"
+    BUTTONS[key] = search
 
     if HYPER_MODE:
         cap_lines = []
@@ -917,6 +994,12 @@ async def auto_filter(client, msg, spoll=False):
         else:
             btn.append([InlineKeyboardButton(text="📃 1/1", callback_data="pages")])
             
+    btn.append([
+        InlineKeyboardButton("📤 SEND ALL", callback_data=f"sendall#{key}"),
+        InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"langmenu#{key}"),
+        InlineKeyboardButton("🎞 QUALITY", callback_data=f"qualitymenu#{key}"),
+    ])
+
     imdb = await get_poster(search, file=(files[0]).file_name) if settings["imdb"] else None
     TEMPLATE = settings['template']
     if imdb:
