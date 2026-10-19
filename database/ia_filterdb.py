@@ -190,3 +190,55 @@ async def get_series_grouped(limit=30):
         title: sorted(set(eps))[:10]
         for title, eps in grouped.items() if eps
     }
+
+
+# Lightweight search analytics and recent-media helpers. Existing Media schema is unchanged.
+_search_stats = db.get_collection("movie_search_stats")
+
+async def record_movie_search(query):
+    """Count normalized user movie searches without storing user identifiers."""
+    title = re.sub(r"\s+", " ", str(query or "")).strip()
+    if not title or len(title) > 160:
+        return
+    key = title.casefold()
+    try:
+        await _search_stats.update_one(
+            {"_id": key},
+            {"$set": {"title": title}, "$inc": {"count": 1}},
+            upsert=True,
+        )
+    except Exception:
+        logger.exception("Could not record movie search")
+
+async def get_most_searched_movies(limit=10):
+    try:
+        cursor = _search_stats.find({}).sort([("count", -1), ("title", 1)]).limit(limit)
+        return await cursor.to_list(length=limit)
+    except Exception:
+        logger.exception("Could not load popular movie searches")
+        return []
+
+async def get_recent_movie_titles(limit=10):
+    """Distinct recent media titles; release year is only inferred if present in filename."""
+    cursor = Media.find({}).sort("$natural", -1).limit(500)
+    files = await cursor.to_list(length=500)
+    results, seen = [], set()
+    for item in files:
+        name = re.sub(r"[_]+", " ", getattr(item, "file_name", "") or "").strip()
+        if not name:
+            continue
+        # Remove common quality/codec tags, preserving a year token if one exists.
+        clean = re.sub(r"\b(480p|540p|720p|1080p|2160p|4k|x264|x265|hevc|h264|h265|webrip|web-dl|bluray|hdrip|hdtv)\b", " ", name, flags=re.I)
+        clean = re.sub(r"\s+", " ", clean).strip(" .-_")
+        match = re.search(r"\b(19\d{2}|20\d{2})\b", clean)
+        year = int(match.group(1)) if match else None
+        if match:
+            clean = clean[:match.start()].strip(" .-_")
+        key = re.sub(r"[^a-z0-9]", "", clean.casefold())
+        if len(key) < 2 or key in seen:
+            continue
+        seen.add(key)
+        results.append({"title": clean, "year": year})
+        if len(results) >= limit:
+            break
+    return results
