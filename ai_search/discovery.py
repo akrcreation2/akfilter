@@ -447,22 +447,34 @@ _FILE_WORDS = re.compile(
 
 
 def looks_like_discovery_query(query: str) -> bool:
-    """Decide whether the message deserves an external discovery attempt.
+    """Only use external discovery for explicit movie/person discovery requests.
 
-    Normal movie/person text is discovery-first. Technical file queries stay on
-    the existing fast Media search path. If discovery finds nothing, the caller
-    can safely fall back to the legacy search.
+    Short titles ("Kantara", "Yajman", "KGF"), language-only messages
+    ("Kannada"), and ordinary title + language queries must go to the bot's
+    own Media database first. External public search is noisy for these queries
+    and can return unrelated pages such as temples, dictionaries, or future films.
     """
     q = re.sub(r"\s+", " ", (query or "").strip())
-    if not q:
+    if not q or _FILE_WORDS.search(q):
         return False
-    if _FILE_WORDS.search(q):
-        return False
-    if len(q.split()) >= 2:
+    # Explicit discovery intent only: actor filmography / recommendations / cast.
+    explicit_intent = re.search(
+        r"\b(?:filmography|acted\s+by|movies?\s+(?:of|by|with)|films?\s+(?:of|by|with)|"
+        r"all\s+(?:movies?|films?)\s+(?:of|by)|cast\s+of|who\s+(?:acted|stars?)\s+in|"
+        r"recommend(?:ed|ations?)?\s+movies?|similar\s+movies?|"
+        r"\b[a-z][a-z .'-]{1,60}\s+movies?\b|acted\s+together|hero\s+and\s+heroine)",
+        q,
+        re.IGNORECASE,
+    )
+    if explicit_intent:
         return True
-    # One-word titles can also be discovered, but commands/very generic words
-    # should remain on the old path.
-    return q.casefold() not in {"hi", "hello", "help", "start", "search", "movie", "movies"}
+    # A bare language name is a filter, not an external movie-discovery query.
+    if re.fullmatch(
+        r"(?:kannada|kannad|hindi|hind|english|eng|tamil|tam|telugu|tel|malayalam|mal|"
+        r"bengali|bangla|marathi|punjabi|gujarati|urdu)", q, re.IGNORECASE
+    ):
+        return False
+    return False
 
 
 def _query_constraints(query: str):
