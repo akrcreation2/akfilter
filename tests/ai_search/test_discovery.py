@@ -6,11 +6,17 @@ class DiscoveryTests(unittest.TestCase):
     def test_person_movie_query_is_discovery(self):
         self.assertTrue(looks_like_discovery_query("Duniya Vijay movies"))
 
-    def test_plain_person_query_is_discovery_first(self):
-        self.assertTrue(looks_like_discovery_query("Duniya Vijay"))
+    def test_plain_person_query_uses_database_first(self):
+        self.assertFalse(looks_like_discovery_query("Duniya Vijay"))
 
-    def test_movie_title_query_is_discovery_first(self):
-        self.assertTrue(looks_like_discovery_query("Yajamana"))
+    def test_movie_title_query_uses_database_first(self):
+        self.assertFalse(looks_like_discovery_query("Yajamana"))
+
+    def test_title_and_language_uses_database_first(self):
+        self.assertFalse(looks_like_discovery_query("Kantara Kannada"))
+
+    def test_language_only_uses_database_first(self):
+        self.assertFalse(looks_like_discovery_query("Kannada"))
 
     def test_long_natural_language_query_is_discovery(self):
         self.assertTrue(looks_like_discovery_query(
