@@ -57,3 +57,19 @@ class DiscoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_tmdb_language_codes_cover_indian_languages():
+    from ai_search.discovery import _TMDB_LANGUAGE_CODES
+    assert _TMDB_LANGUAGE_CODES["kannada"] == "kn"
+    assert _TMDB_LANGUAGE_CODES["tamil"] == "ta"
+    assert _TMDB_LANGUAGE_CODES["telugu"] == "te"
+    assert _TMDB_LANGUAGE_CODES["malayalam"] == "ml"
+    assert _TMDB_LANGUAGE_CODES["hindi"] == "hi"
+
+
+def test_tmdb_disabled_without_credentials(monkeypatch):
+    from ai_search.discovery import _tmdb_enabled
+    monkeypatch.delenv("TMDB_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    assert _tmdb_enabled() is False
