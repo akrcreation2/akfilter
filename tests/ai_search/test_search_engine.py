@@ -13,6 +13,13 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             async def search(self, intent): raise RuntimeError("offline")
         result = await SearchEngine(Broken()).search(QueryParser().parse("Darshan movie"))
         self.assertEqual(result, [])
+
+    async def test_title_prefix_expansion_supports_small_typos(self):
+        from ai_search.adapter import MongoDBSearchProvider
+        intent = QueryParser().parse("Yajman Kannada")
+        terms = await MongoDBSearchProvider._pattern_terms(intent)
+        self.assertIn("yajm", [term.casefold() for term in terms])
+
     async def test_search(self):
         result = await SearchEngine(Provider()).search(QueryParser().parse("Darshan movie"))
         self.assertEqual(result[0].file_id, "1")
