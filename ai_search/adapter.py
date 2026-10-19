@@ -57,6 +57,19 @@ class MongoDBSearchProvider(SearchProvider):
                 value = str(value).strip()
                 if value.casefold() not in {x.casefold() for x in terms}:
                     terms.append(value)
+
+        # Typo-tolerant retrieval without scanning the whole Media collection:
+        # include a short prefix for longer title tokens. Ranking then decides
+        # which candidates are actually close to the requested title.
+        # Example: "yajman" can still retrieve "Yajamana" via the shared prefix.
+        prefix_terms = []
+        for value in [intent.title, *intent.keywords]:
+            for token in fold(str(value or "")).split():
+                if len(token) >= 5:
+                    prefix = token[:4]
+                    if prefix not in {x.casefold() for x in terms + prefix_terms}:
+                        prefix_terms.append(prefix)
+        terms.extend(prefix_terms[:12])
         return terms
 
     @staticmethod
@@ -161,9 +174,51 @@ class MongoDBSearchProvider(SearchProvider):
                     if matched_person_title is None:
                         continue
 
-            # Hard filters are applied only when the user explicitly requested them.
-            if intent.language and intent.language.casefold() not in folded:
-                continue
+            metadata = normalize_media_metadata({
+                "file_name": file_name,
+                "caption": caption,
+                "mime_type": getattr(file, "mime_type", ""),
+                "file_type": getattr(file, "file_type", ""),
+                "width": getattr(file, "width", None),
+                "height": getattr(file, "height", None),
+                "language": getattr(file, "language", None),
+                "quality": getattr(file, "quality", None),
+                "actors": getattr(file, "actors", []) or [],
+                "cast": getattr(file, "cast", []) or [],
+                "themes": getattr(file, "themes", []) or [],
+            })
+
+            # Hard filters are applied only when metadata can verify them.
+            # RDX-style metadata lookup is useful for discovery, but actual
+            # availability must still come from this bot's own Media collection.
+            if intent.language:
+                language_aliases = {
+                    "kannada": ("kannada", "kannad", "kan", "kn", "ಕನ್ನಡ"),
+                    "hindi": ("hindi", "hind", "hin", "hi", "हिंदी"),
+                    "english": ("english", "eng", "en"),
+                    "tamil": ("tamil", "tam", "ta", "தமிழ்"),
+                    "telugu": ("telugu", "tel", "te", "తెలుగు"),
+                    "malayalam": ("malayalam", "mal", "ml", "മലയാളം"),
+                    "bengali": ("bengali", "bangla", "ben", "বাংলা"),
+                    "marathi": ("marathi", "mar", "mr", "मराठी"),
+                    "punjabi": ("punjabi", "pun", "pa", "ਪੰਜਾਬੀ"),
+                    "urdu": ("urdu", "urd", "ur", "اردو"),
+                }
+                aliases = language_aliases.get(intent.language.casefold(), (intent.language.casefold(),))
+                language_text = fold(" ".join((searchable, str(metadata.get("language") or ""))))
+                has_language_evidence = any(
+                    re.search(rf"(?<!\w){re.escape(fold(alias))}(?!\w)", language_text, re.I)
+                    for alias in aliases
+                )
+                # Unknown language metadata is not a reason to discard a potentially
+                # valid file; known contradictory tags are filtered below by evidence.
+                known_tags = tuple(a for values in language_aliases.values() for a in values)
+                has_any_language_tag = any(
+                    re.search(rf"(?<!\w){re.escape(fold(alias))}(?!\w)", language_text, re.I)
+                    for alias in known_tags
+                )
+                if has_any_language_tag and not has_language_evidence:
+                    continue
 
             filename_year = extract_year(searchable)
             effective_year = filename_year or matched_person_year
@@ -174,13 +229,11 @@ class MongoDBSearchProvider(SearchProvider):
                     continue
 
             if intent.quality:
-                quality_tokens = re.findall(
-                    r"\b(?:4k|uhd|fhd|hd|1080p?|720p?|576p?|480p?|360p?)\b",
-                    searchable,
-                    re.I,
-                )
-                normalized = [normalize_quality(x) for x in quality_tokens]
-                if intent.quality not in normalized:
+                detected_quality = metadata.get("quality")
+                # If a file carries quality/resolution metadata, respect it. If
+                # quality is absent, keep the candidate and let ranking score it
+                # neutrally instead of incorrectly hiding valid files.
+                if detected_quality and intent.quality != detected_quality:
                     continue
 
             if intent.season is not None:
@@ -191,16 +244,6 @@ class MongoDBSearchProvider(SearchProvider):
                 episode = extract_episode(searchable)
                 if episode != intent.episode:
                     continue
-
-            metadata = normalize_media_metadata({
-                "file_name": file_name,
-                "caption": caption,
-                "mime_type": getattr(file, "mime_type", ""),
-                "file_type": getattr(file, "file_type", ""),
-                "actors": getattr(file, "actors", []) or [],
-                "cast": getattr(file, "cast", []) or [],
-                "themes": getattr(file, "themes", []) or [],
-            })
 
             # The existing Media schema does not contain actor metadata.  Mark a
             # filmography match internally so ranking can still understand why the
