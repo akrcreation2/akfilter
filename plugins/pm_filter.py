@@ -10,13 +10,13 @@ from database.connections_mdb import active_connection, all_connections, delete_
     make_inactive
 from info import ADMINS, AUTH_USERS, CUSTOM_FILE_CAPTION, AUTH_GROUPS, P_TTI_SHOW_OFF, IMDB, \
     SINGLE_BUTTON, SPELL_CHECK_REPLY, IMDB_TEMPLATE, IS_VERIFY, HOW_TO_VERIFY
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerIdInvalid
 from utils import get_size, is_subscribed, get_poster, search_gagala, temp, get_settings, save_group_settings, create_invite_links, get_shortlink, check_verification, get_token
 from database.users_chats_db import db
 from info import HYPER_MODE
-from database.ia_filterdb import Media, get_file_details, get_search_results, record_movie_search, get_most_searched_movies, get_recent_movie_titles
+from database.ia_filterdb import Media, get_file_details, get_search_results
 from ai_search.integration import ai_aware_search
 from ai_search.discovery import discover_movies_with_timeout, looks_like_discovery_query
 from ai_search.discovery_store import get as get_discovery, put as put_discovery
@@ -836,10 +836,6 @@ async def auto_filter(client, msg, spoll=False):
         # requests.  Commands/empty messages are still ignored above.
         if 2 < len(message.text) <= 4000:
             search = message.text.strip()
-            try:
-                await record_movie_search(search)
-            except Exception:
-                logger.exception("Search analytics update failed")
             # Discovery is a separate first stage. It finds movie titles from
             # public/AI metadata and DOES NOT touch Media until a title button
             # is clicked. Technical/file-oriented queries retain the existing
@@ -921,6 +917,16 @@ async def auto_filter(client, msg, spoll=False):
         else:
             btn.append([InlineKeyboardButton(text="📃 1/1", callback_data="pages")])
             
+    # Search action controls are attached to the same inline keyboard as results.
+    # Keep the existing file buttons and pagination unchanged.
+    control_key = f"{message.chat.id}-{message.id}"
+    BUTTONS[control_key] = search
+    btn.append([
+        InlineKeyboardButton("📤 SEND ALL", callback_data=f"resultall:{control_key}"),
+        InlineKeyboardButton("🌐 LANGUAGE", callback_data=f"resultlang:{control_key}"),
+        InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{control_key}"),
+    ])
+
     imdb = await get_poster(search, file=(files[0]).file_name) if settings["imdb"] else None
     TEMPLATE = settings['template']
     if imdb:
@@ -1075,6 +1081,77 @@ async def advantage_spell_chok(client, msg):
     await spell_check_del.delete()
 
 
+@Client.on_callback_query(filters.regex(r"^resultlang:"))
+async def result_language_menu(client, query):
+    key = query.data.split(":", 1)[1]
+    if key not in BUTTONS:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    rows = [[InlineKeyboardButton(lang, callback_data=f"resultapply:{key}:lang:{lang}")] for lang in
+            ("Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "English", "Bengali", "Marathi")]
+    rows.append([InlineKeyboardButton("⬅️ BACK", callback_data=f"resultback:{key}")])
+    await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+    await query.answer()
+
+@Client.on_callback_query(filters.regex(r"^resultquality:"))
+async def result_quality_menu(client, query):
+    key = query.data.split(":", 1)[1]
+    if key not in BUTTONS:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    rows = [[InlineKeyboardButton(q, callback_data=f"resultapply:{key}:quality:{q}")] for q in
+            ("2160p", "1440p", "1080p", "720p", "540p", "480p", "360p")]
+    rows.append([InlineKeyboardButton("⬅️ BACK", callback_data=f"resultback:{key}")])
+    await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+    await query.answer()
+
+@Client.on_callback_query(filters.regex(r"^resultback:"))
+async def result_back(client, query):
+    key = query.data.split(":", 1)[1]
+    search = BUTTONS.get(key)
+    if not search:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    await query.answer("Search the movie again to restore its results.")
+
+@Client.on_callback_query(filters.regex(r"^resultapply:"))
+async def result_apply_filter(client, query):
+    # Re-run the existing search pipeline with a metadata term; the original
+    # database search and download callbacks remain untouched.
+    parts = query.data.split(":", 3)
+    if len(parts) != 4:
+        return await query.answer("Invalid filter.", show_alert=True)
+    key, kind, value = parts[1], parts[2], parts[3]
+    search = BUTTONS.get(key)
+    if not search:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    filtered_query = f"{search} {value}"
+    await query.answer(f"Filtering: {value}")
+    try:
+        search_message = await client.send_message(query.message.chat.id, filtered_query)
+        await auto_filter(client, search_message)
+    except Exception as exc:
+        logger.exception("Result filter failed: %s", exc)
+        await query.message.reply_text("Could not apply this filter. Try searching the movie name with the language/quality.")
+
+@Client.on_callback_query(filters.regex(r"^resultall:"))
+async def result_send_all(client, query):
+    key = query.data.split(":", 1)[1]
+    search = BUTTONS.get(key)
+    if not search:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    await query.answer("Sending matching files…")
+    try:
+        files, _, _ = await get_search_results(search, max_results=50, offset=0, filter=True)
+        if not files:
+            return await query.message.reply_text("No matching files found.")
+        for media in files:
+            try:
+                await client.send_cached_media(query.message.chat.id, media.file_id)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await client.send_cached_media(query.message.chat.id, media.file_id)
+    except Exception as exc:
+        logger.exception("Send all failed: %s", exc)
+        await query.message.reply_text("Unable to send all files right now. Please try again later.")
+
 async def manual_filters(client, message, text=False):
     group_id = message.chat.id
     name = text or message.text
@@ -1126,53 +1203,3 @@ async def manual_filters(client, message, text=False):
                 break
     else:
         return False
-
-
-# Optional discovery panel. This is additive; the existing start/search handlers remain unchanged.
-async def _movie_home_markup():
-    from datetime import datetime
-    popular = await get_most_searched_movies(10)
-    recent = await get_recent_movie_titles(10)
-    year_now = datetime.now().year
-    current_year = [m for m in recent if m.get("year") == year_now]
-    chosen = current_year if current_year else recent
-    rows = []
-    if popular:
-        rows.append([InlineKeyboardButton("🔥 MOST SEARCHED", callback_data="moviehome:noop")])
-        for item in popular[:10]:
-            title = item.get("title", "")
-            rows.append([InlineKeyboardButton(f"{title[:48]} · {item.get('count', 0)}", callback_data=f"moviehome:search:{title[:45]}")])
-    if chosen:
-        rows.append([InlineKeyboardButton("🎬 RECENT MOVIES", callback_data="moviehome:noop")])
-        for i in range(0, min(len(chosen), 10), 2):
-            pair = chosen[i:i+2]
-            row = []
-            for movie in pair:
-                title = movie["title"]
-                year = movie.get("year")
-                label = f"{title} ({year})" if year else title
-                row.append(InlineKeyboardButton(label[:32], callback_data=f"moviehome:search:{title[:45]}"))
-            rows.append(row)
-    if not rows:
-        rows = [[InlineKeyboardButton("No indexed movies yet", callback_data="moviehome:noop")]]
-    return InlineKeyboardMarkup(rows), "🎬 <b>Movie Hub</b>\n\n🔥 Most searched movies and recently indexed titles.\nRecent release year is inferred from indexed filenames when available."
-
-@Client.on_message(filters.command(["moviehub", "popular"]) & filters.incoming)
-async def movie_discovery_home(client, message):
-    markup, text = await _movie_home_markup()
-    await message.reply_text(text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
-
-@Client.on_callback_query(filters.regex(r"^moviehome:"))
-async def movie_home_callback(client, query):
-    data = query.data.split(":", 2)
-    action = data[1] if len(data) > 1 else "noop"
-    if action == "noop":
-        return await query.answer()
-    if action == "search" and len(data) > 2:
-        title = data[2]
-        await query.answer(f"Searching {title}")
-        try:
-            await auto_filter(client, query.message, title)
-        except Exception:
-            logger.exception("Movie hub search failed")
-            await query.message.reply_text("Search failed. Please try the title manually.")
