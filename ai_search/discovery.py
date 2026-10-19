@@ -260,6 +260,7 @@ def _wikidata_films_sync(
     year_range: Optional[Tuple[int, int]] = None,
     language: Optional[str] = None,
     limit: int = 80,
+    role: str = "cast",
 ) -> List[MovieCandidate]:
     if not qids:
         return []
@@ -267,10 +268,9 @@ def _wikidata_films_sync(
     if not values:
         return []
 
-    # P161 = cast member, P577 = publication/release date, P407 = language of work.
-    # For multiple people, requiring all P161 values gives the desired
-    # "acted together" intersection without touching the bot database.
-    person_filters = "\n".join(f"?film wdt:P161 wd:{qid}." for qid in qids if re.fullmatch(r"Q\d+", qid))
+    # P161 = cast member, P57 = director, P162 = producer.
+    relation = {"director": "P57", "producer": "P162"}.get(role, "P161")
+    person_filters = "\n".join(f"?film wdt:{relation} wd:{qid}." for qid in qids if re.fullmatch(r"Q\d+", qid))
     filters = []
     if year is not None:
         filters.append(f"FILTER(YEAR(?date) = {int(year)})")
@@ -559,30 +559,65 @@ def _person_hint_from_query(query: str) -> Optional[str]:
     return None
 
 
+def _person_query_role(query: str) -> str:
+    """Return the relationship requested for a person discovery query."""
+    q = (query or "").casefold()
+    if re.search(r"\b(direct(?:ed|or|ion)?|direction|directorial)\b", q):
+        return "director"
+    if re.search(r"\b(produced|producer|production)\b", q):
+        return "producer"
+    return "cast"
+
+
+def _person_hint_from_natural_query(query: str) -> Optional[str]:
+    """Extract names from common natural-language filmography prompts."""
+    q = re.sub(r"\s+", " ", (query or "")).strip(" ?.!\t")
+    patterns = [
+        r"^(.{2,70}?)\s+acted\s+in\s+which\s+movies?\s*$",
+        r"^(.{2,70}?)\s+(?:direction|directed)\s+movies?\s*$",
+        r"^(?:movies?|films?)\s+(?:directed\s+by|of|by|with)\s+(.{2,70})$",
+        r"^(?:show|list|give|find)?\s*(?:me\s+)?(?:all\s+)?movies?\s+(?:of|by|with)\s+(.{2,70})$",
+        r"^(.{2,70}?)\s+(?:movies?|films?|filmography)\s*$",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, q, re.I)
+        if m:
+            name = re.sub(r"\b(?:the|all|movies?|films?|filmography|please|me|which|acted|acting|direction|directed|in|by|of)\b", " ", m.group(1), flags=re.I)
+            name = re.sub(r"\s+", " ", name).strip(" ,.-")
+            if name and len(name) <= 70:
+                return name
+    return None
+
+
 def _discover_sync(query: str, limit: int = MAX_RESULTS) -> List[MovieCandidate]:
     year, year_range, language = _query_constraints(query)
 
     # 1) Structured people search. This is the most accurate and fastest route
     # for filmography and "acted together" questions.
-    person_hint = _person_hint_from_query(query)
+    person_hint = _person_hint_from_natural_query(query) or _person_hint_from_query(query)
+    role = _person_query_role(query)
     people: List[Tuple[str, str]] = []
     if person_hint:
         resolved = _resolve_person_sync(person_hint)
         if resolved:
             people = [resolved]
     if not people:
-        people = _resolve_people_sync(query, max_people=4)
+        people = _resolve_people_sync(query, max_people=1)
 
     if people:
         movies = _wikidata_films_sync(
-            [qid for qid, _ in people[:4]],
+            [qid for qid, _ in people[:1]],
             year=year,
             year_range=year_range,
             language=language,
             limit=limit,
+            role=role,
         )
         if movies:
             return _dedupe(movies, limit)
+        # Person queries should not fall through to generic web results, which
+        # previously turned unrelated page titles into movie suggestions.
+        return []
 
     # A language/year-only request can be answered directly from public
     # structured movie metadata; no person or local file index is needed.
