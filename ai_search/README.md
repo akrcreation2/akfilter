@@ -8,7 +8,10 @@ The project has two intentionally separate search stages.
 
 - Wikidata entity search and SPARQL for structured cast/release/language relationships.
 - Wikipedia search for public movie pages and filmography information.
+- TMDB movie/person metadata when `TMDB_ACCESS_TOKEN` or `TMDB_API_KEY` is configured.
 - DuckDuckGo HTML search as a broad web-search fallback.
+
+TMDB credentials are optional environment variables; never commit credentials into source code. For a TMDB Bearer token set `TMDB_ACCESS_TOKEN`; alternatively set `TMDB_API_KEY`. TMDB usage is subject to its current terms, attribution requirements, and any applicable commercial licensing rules. Without credentials, discovery falls back to the public sources above.
 
 This supports queries such as actor filmographies, multiple people who acted together, language/year movie requests, dubbed/movie-topic searches, and long natural-language requests when the public sources can answer them.
 
