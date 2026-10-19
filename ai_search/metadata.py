@@ -95,14 +95,24 @@ def extract_year(text: str) -> Optional[int]:
 def normalize_media_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Normalize optional provider metadata without assuming a specific DB schema."""
     data = dict(metadata or {})
-    name = str(data.get("file_name") or data.get("title") or "")
+    name = " ".join(
+        str(value or "") for value in (
+            data.get("file_name"), data.get("title"), data.get("caption")
+        ) if value
+    )
 
     language = data.get("language") or data.get("lang")
     if language:
         data["language"] = normalize_language(str(language)) or language
     else:
         folded = fold(name)
-        for alias in ("kannada", "ಕನ್ನಡ", "hindi", "tamil", "telugu", "malayalam", "english"):
+        for alias in (
+            "kannada", "kannad", "kan", "ಕನ್ನಡ",
+            "hindi", "hind", "hin", "हिंदी",
+            "tamil", "tam", "தமிழ்", "telugu", "tel", "తెలుగు",
+            "malayalam", "mal", "മലയാളം", "english", "eng",
+            "bengali", "bangla", "marathi", "punjabi", "urdu",
+        ):
             if alias in folded:
                 data["language"] = normalize_language(alias)
                 break
