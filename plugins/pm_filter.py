@@ -269,10 +269,31 @@ async def cb_handler(client: Client, query: CallbackQuery):
             if not details:
                 return await query.answer("File is no longer available.", show_alert=True)
             media = details[0]
-            server_url = os.environ.get("DOWNLOAD_SERVER_URL", "").rstrip("/")
-            api_key = os.environ.get("DOWNLOAD_SERVER_API_KEY", "")
+            # Accept the existing STREAM_URL setup, while retaining support for
+            # the newer DOWNLOAD_SERVER_* variable names.
+            server_url = (
+                os.environ.get("DOWNLOAD_SERVER_URL")
+                or os.environ.get("STREAM_URL")
+                or os.environ.get("KEEP_ALIVE_URL")
+                or ""
+            ).rstrip("/")
+            # This must match API_SECRET configured on the Cini-Santhe Render service.
+            api_key = (
+                os.environ.get("DOWNLOAD_SERVER_API_KEY")
+                or os.environ.get("STREAM_SECRET")
+                or os.environ.get("API_SECRET")
+                or ""
+            )
             if not server_url or not api_key:
-                return await query.answer("Download server is not configured.", show_alert=True)
+                missing = []
+                if not server_url:
+                    missing.append("STREAM_URL")
+                if not api_key:
+                    missing.append("STREAM_SECRET (same value as Render API_SECRET)")
+                return await query.answer(
+                    "Download server configuration missing: " + ", ".join(missing),
+                    show_alert=True
+                )
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 async with session.post(
                     f"{server_url}/api/links",
