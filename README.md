@@ -120,3 +120,7 @@ For example, `Duniya Vijay movies` resolves the person from public data and retr
 The bot does **not** inspect its MongoDB Media collection during discovery. It shows the discovered movie names as Telegram buttons. The existing Media/file database is queried only after the user clicks a movie button. If public discovery cannot produce a result, the original file search remains as a fallback.
 
 Optional settings: `AI_DISCOVERY_CACHE_DIR`, `AI_DISCOVERY_CACHE_TTL`, `AI_DISCOVERY_NETWORK_TIMEOUT`, and `AI_DISCOVERY_TIMEOUT`.
+
+
+## External Stream/Download Server
+Set `DOWNLOAD_SERVER_URL` to the Northflank public HTTPS URL and `DOWNLOAD_SERVER_API_KEY` to the same secret configured as `API_SECRET` on the separate download server. The file message button requests links from that service; the AI search and filter bot remains on Koyeb.
