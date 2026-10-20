@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 
 BUTTONS = {}
+RESULT_KEYBOARDS = {}
 SPELL_CHECK = {}
 
 
@@ -194,6 +195,14 @@ async def next_page(bot, query):
                 InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{req}_{key}_{n_offset}")
             ]
         )
+    # Keep the three search controls at the TOP of every result page.
+    btn.insert(0, [
+        InlineKeyboardButton("📤 SEND ALL", callback_data=f"resultall:{key}"),
+        InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"resultlang:{key}"),
+        InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{key}"),
+    ])
+    RESULT_KEYBOARDS[key] = list(btn)
+
     try:
         if HYPER_MODE:
             await query.edit_message_text(
@@ -917,15 +926,15 @@ async def auto_filter(client, msg, spoll=False):
         else:
             btn.append([InlineKeyboardButton(text="📃 1/1", callback_data="pages")])
             
-    # Search action controls are attached to the same inline keyboard as results.
-    # Keep the existing file buttons and pagination unchanged.
+    # Search controls must appear ABOVE the movie/file buttons, not at the bottom.
     control_key = f"{message.chat.id}-{message.id}"
     BUTTONS[control_key] = search
-    btn.append([
+    btn.insert(0, [
         InlineKeyboardButton("📤 SEND ALL", callback_data=f"resultall:{control_key}"),
-        InlineKeyboardButton("🌐 LANGUAGE", callback_data=f"resultlang:{control_key}"),
+        InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"resultlang:{control_key}"),
         InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{control_key}"),
     ])
+    RESULT_KEYBOARDS[control_key] = list(btn)
 
     imdb = await get_poster(search, file=(files[0]).file_name) if settings["imdb"] else None
     TEMPLATE = settings['template']
@@ -1086,30 +1095,49 @@ async def result_language_menu(client, query):
     key = query.data.split(":", 1)[1]
     if key not in BUTTONS:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    rows = [[InlineKeyboardButton(lang, callback_data=f"resultapply:{key}:lang:{lang}")] for lang in
-            ("Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "English", "Bengali", "Marathi")]
-    rows.append([InlineKeyboardButton("⬅️ BACK", callback_data=f"resultback:{key}")])
+    # Two-column language selector, with full names and familiar short labels.
+    langs = [("Malayalam", "MAL", "Malayalam"), ("Tamil", "TAM", "Tamil"),
+             ("English", "ENG", "English"), ("Hindi", "HIN", "Hindi"),
+             ("Telugu", "TEL", "Telugu"), ("Kannada", "KAN", "Kannada"),
+             ("Bengali", "BEN", "Bengali"), ("Marathi", "MAR", "Marathi")]
+    rows = [[InlineKeyboardButton("👇 SELECT YOUR LANGUAGES 👇", callback_data="pages")]]
+    for full, short, value in langs:
+        # Pair the full name and abbreviation; both buttons apply the same filter.
+        rows.append([
+            InlineKeyboardButton(full, callback_data=f"resultapply:{key}:lang:{value}"),
+            InlineKeyboardButton(short, callback_data=f"resultapply:{key}:lang:{value}"),
+        ])
+    rows.append([InlineKeyboardButton("« BACK", callback_data=f"resultback:{key}")])
     await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
-    await query.answer()
+    await query.answer("Choose a language")
 
 @Client.on_callback_query(filters.regex(r"^resultquality:"))
 async def result_quality_menu(client, query):
     key = query.data.split(":", 1)[1]
     if key not in BUTTONS:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    rows = [[InlineKeyboardButton(q, callback_data=f"resultapply:{key}:quality:{q}")] for q in
-            ("2160p", "1440p", "1080p", "720p", "540p", "480p", "360p")]
-    rows.append([InlineKeyboardButton("⬅️ BACK", callback_data=f"resultback:{key}")])
+    qualities = ("2160p", "1440p", "1080p", "720p", "540p", "480p", "360p", "Other")
+    rows = [[InlineKeyboardButton("👇 SELECT YOUR QUALITY 👇", callback_data="pages")]]
+    for i in range(0, len(qualities), 2):
+        pair = qualities[i:i + 2]
+        rows.append([InlineKeyboardButton(q, callback_data=f"resultapply:{key}:quality:{q}") for q in pair])
+    rows.append([InlineKeyboardButton("« BACK", callback_data=f"resultback:{key}")])
     await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
-    await query.answer()
+    await query.answer("Choose a quality")
 
 @Client.on_callback_query(filters.regex(r"^resultback:"))
 async def result_back(client, query):
     key = query.data.split(":", 1)[1]
-    search = BUTTONS.get(key)
-    if not search:
+    if key not in BUTTONS:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    await query.answer("Search the movie again to restore its results.")
+    keyboard = RESULT_KEYBOARDS.get(key)
+    if not keyboard:
+        return await query.answer("Search results expired. Please search again.", show_alert=True)
+    try:
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(keyboard))
+    except MessageNotModified:
+        pass
+    await query.answer("Back to results")
 
 @Client.on_callback_query(filters.regex(r"^resultapply:"))
 async def result_apply_filter(client, query):
