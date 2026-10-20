@@ -20,7 +20,8 @@ from database.ia_filterdb import Media, get_file_details, get_search_results
 from ai_search.integration import ai_aware_search
 from ai_search.discovery import discover_movies_with_timeout, looks_like_discovery_query
 from ai_search.discovery_store import get as get_discovery, put as put_discovery
-from plugins.stream_links import create_stream_links
+import os
+import aiohttp
 from database.filters_mdb import (
     del_all,
     find_filter,
@@ -268,7 +269,22 @@ async def cb_handler(client: Client, query: CallbackQuery):
             if not details:
                 return await query.answer("File is no longer available.", show_alert=True)
             media = details[0]
-            watch_url, download_url, expires_at = await create_stream_links(client, file_id, getattr(media, "file_name", "file"))
+            server_url = os.environ.get("DOWNLOAD_SERVER_URL", "").rstrip("/")
+            api_key = os.environ.get("DOWNLOAD_SERVER_API_KEY", "")
+            if not server_url or not api_key:
+                return await query.answer("Download server is not configured.", show_alert=True)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                async with session.post(
+                    f"{server_url}/api/links",
+                    json={"file_id": file_id, "file_name": getattr(media, "file_name", "file")},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                ) as response:
+                    payload = await response.json(content_type=None)
+                    if response.status != 200:
+                        raise RuntimeError(payload.get("error", "Download server request failed"))
+            watch_url = payload["stream_url"]
+            download_url = payload["download_url"]
+            expires_at = int(payload["expires_at"])
             from datetime import datetime, timezone
             expiry_text = datetime.fromtimestamp(expires_at, timezone.utc).strftime("%d %b %Y, %H:%M UTC")
             message_text = (
