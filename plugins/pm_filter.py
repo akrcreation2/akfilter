@@ -131,7 +131,18 @@ async def next_page(bot, query):
     if filtered_files is not None:
         total = len(filtered_files)
         files = filtered_files[offset:offset + 10]
-        n_offset = offset + 10 if offset + 10 < total else 0
+        if not files:
+            return await query.answer("No more files on this page.", show_alert=True)
+        state.update({"current_files": files, "offset": offset, "total": total})
+        RESULT_STATE[key] = state
+        keyboard = _build_filter_keyboard(key, int(req), filtered_files, offset)
+        RESULT_KEYBOARDS[key] = list(keyboard)
+        try:
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+        except MessageNotModified:
+            pass
+        await query.answer()
+        return
     else:
         files, n_offset, total = await ai_aware_search(search, offset=offset, filter=True)
         try:
@@ -274,6 +285,10 @@ async def cb_handler(client: Client, query: CallbackQuery):
         return await result_back(client, query)
     elif query.data.startswith("resultall:"):
         return await result_send_all(client, query)
+    elif query.data.startswith("resultundo:"):
+        return await result_undo_filter(client, query)
+    elif query.data.startswith("resultreset:"):
+        return await result_reset_filters(client, query)
     elif query.data.startswith("aidiscpage:"):
         _, token, offset = query.data.split(":", 2)
         try:
@@ -1131,35 +1146,19 @@ async def result_language_menu(client, query):
     key = query.data.split(":", 1)[1]
     if key not in BUTTONS:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    # All 22 constitutionally scheduled Indian languages plus English.
+    # Keep the language selector compact and limited to the eight requested languages.
     langs = [
-        ("Assamese", "ASM", "Assamese|Asamiya|ASM|AS"),
-        ("Bengali", "BEN", "Bengali|Bangla|BEN|BN"),
-        ("Bodo", "BRX", "Bodo|BRX"),
-        ("Dogri", "DGO", "Dogri|DGO"),
-        ("English", "ENG", "English|ENG|EN"),
-        ("Gujarati", "GUJ", "Gujarati|GUJ|GU"),
-        ("Hindi", "HIN", "Hindi|HIN|HI"),
-        ("Kannada", "KAN", "Kannada|Kanada|Kannad|KAN|KN"),
-        ("Kashmiri", "KAS", "Kashmiri|KAS"),
-        ("Konkani", "KOK", "Konkani|KOK"),
-        ("Maithili", "MAI", "Maithili|MAI"),
-        ("Malayalam", "MAL", "Malayalam|MAL|ML"),
-        ("Manipuri", "MNI", "Manipuri|Meitei|MNI"),
-        ("Marathi", "MAR", "Marathi|MAR|MR"),
-        ("Nepali", "NEP", "Nepali|NEP|NE"),
-        ("Odia", "ORI", "Odia|Oriya|ORI|OD"),
-        ("Punjabi", "PUN", "Punjabi|Panjabi|PUN|PA"),
-        ("Sanskrit", "SAN", "Sanskrit|SAN"),
-        ("Santali", "SAT", "Santali|Santhali|SAT"),
-        ("Sindhi", "SND", "Sindhi|SND"),
-        ("Tamil", "TAM", "Tamil|TAM|TA"),
-        ("Telugu", "TEL", "Telugu|TEL|TE"),
-        ("Urdu", "URD", "Urdu|URD|UR"),
+        ("Kannada", "KAN"), ("English", "ENG"),
+        ("Malayalam", "MAL"), ("Hindi", "HIN"),
+        ("Tamil", "TAM"), ("Telugu", "TEL"),
+        ("Bengali", "BEN"), ("Marathi", "MAR"),
     ]
-    rows = [[InlineKeyboardButton("👇 SELECT YOUR LANGUAGE 👇", callback_data="pages")]]
-    for full, short, aliases in langs:
-        rows.append([InlineKeyboardButton(full, callback_data=f"resultapply:{key}:lang:{short}")])
+    rows = [[InlineKeyboardButton("👇 SELECT YOUR LANGUAGES 👇", callback_data="pages")]]
+    for full, short in langs:
+        rows.append([
+            InlineKeyboardButton(full, callback_data=f"resultapply:{key}:lang:{short}"),
+            InlineKeyboardButton(short, callback_data=f"resultapply:{key}:lang:{short}"),
+        ])
     rows.append([InlineKeyboardButton("« BACK TO RESULTS", callback_data=f"resultback:{key}")])
     try:
         await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
@@ -1210,60 +1209,81 @@ async def result_apply_filter(client, query):
     if not search:
         return await query.answer("Search expired. Please search again.", show_alert=True)
 
-    # Search the original title first, then filter metadata/name in memory. This
-    # avoids injecting a second user message and keeps the result controls in place.
     try:
-        candidates, _, _ = await get_search_results(search, max_results=1000, offset=0, filter=True)
+        state = RESULT_STATE.setdefault(key, {"search": search, "filtered_files": None, "current_files": []})
+        # Load the original candidate set once, then keep all selected filters in memory.
+        candidates = state.get("base_files")
+        if candidates is None:
+            candidates, _, _ = await get_search_results(search, max_results=1000, offset=0, filter=True)
+            if not candidates:
+                candidates, _, _ = await ai_aware_search(search, offset=0, filter=True)
+            candidates = list(candidates or [])
+            state["base_files"] = candidates
         if not candidates:
-            candidates, _, _ = await ai_aware_search(search, offset=0, filter=True)
+            return await query.answer("No files found for this search.", show_alert=True)
+
+        active_filters = dict(state.get("active_filters") or {})
+        history = list(state.get("filter_history") or [])
+        previous_filters = dict(active_filters)
+        active_filters[kind] = value
+
         aliases = {
-            "ASM": ("assamese", "asamiya", "asm"), "BEN": ("bengali", "bangla", "ben"),
-            "BRX": ("bodo", "brx"), "DGO": ("dogri", "dgo"), "ENG": ("english", "eng"),
-            "GUJ": ("gujarati", "guj"), "HIN": ("hindi", "hin"),
-            "KAN": ("kannada", "kanada", "kannad", "kan"), "KAS": ("kashmiri", "kas"),
-            "KOK": ("konkani", "kok"), "MAI": ("maithili", "mai"),
-            "MAL": ("malayalam", "mal", "mly"), "MNI": ("manipuri", "meitei", "mni"),
-            "MAR": ("marathi", "mar"), "NEP": ("nepali", "nep"),
-            "ORI": ("odia", "oriya", "ori"), "PUN": ("punjabi", "panjabi", "pun"),
-            "SAN": ("sanskrit", "san"), "SAT": ("santali", "santhali", "sat"),
-            "SND": ("sindhi", "snd"), "TAM": ("tamil", "tam"),
-            "TEL": ("telugu", "tel"), "URD": ("urdu", "urd"),
+            "BEN": ("bengali", "bangla", "ben", "bn"),
+            "ENG": ("english", "eng", "en"),
+            "HIN": ("hindi", "hin", "hi"),
+            "KAN": ("kannada", "kanada", "kannad", "kan", "kn"),
+            "MAL": ("malayalam", "mal", "mly", "ml"),
+            "MAR": ("marathi", "mar", "mr"),
+            "TAM": ("tamil", "tam", "ta"),
+            "TEL": ("telugu", "tel", "te"),
         }
         quality_pattern = re.compile(r"(?<!\d)(2160p|1440p|1080p|720p|540p|480p|360p|4k|uhd)(?!\d)", re.I)
-        filtered = []
-        for item in candidates:
-            name = f"{getattr(item, 'file_name', '') or ''} {getattr(item, 'caption', '') or ''}".lower()
-            if kind == "lang":
-                terms = aliases.get(value, (value.lower(),))
-                # Match language names or standalone abbreviations, avoiding random substrings.
-                if any(re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", name) for term in terms):
-                    filtered.append(item)
-            elif kind == "quality":
-                if value == "Other":
-                    if not quality_pattern.search(name):
-                        filtered.append(item)
-                elif re.search(rf"(?<!\d){re.escape(value)}(?!\d)", name, re.I) or (value == "2160p" and re.search(r"\b4k\b|\buhd\b", name, re.I)):
-                    filtered.append(item)
-        if not filtered:
-            label = next((full for full, short, _ in [
-                ("Assamese", "ASM", ""), ("Bengali", "BEN", ""), ("Bodo", "BRX", ""),
-                ("Dogri", "DGO", ""), ("English", "ENG", ""), ("Gujarati", "GUJ", ""),
-                ("Hindi", "HIN", ""), ("Kannada", "KAN", ""), ("Kashmiri", "KAS", ""),
-                ("Konkani", "KOK", ""), ("Maithili", "MAI", ""), ("Malayalam", "MAL", ""),
-                ("Manipuri", "MNI", ""), ("Marathi", "MAR", ""), ("Nepali", "NEP", ""),
-                ("Odia", "ORI", ""), ("Punjabi", "PUN", ""), ("Sanskrit", "SAN", ""),
-                ("Santali", "SAT", ""), ("Sindhi", "SND", ""), ("Tamil", "TAM", ""),
-                ("Telugu", "TEL", ""), ("Urdu", "URD", "")
-            ] if short == value), value) if kind == "lang" else value
-            return await query.answer(f"No {label} files found for this search. Choose another {kind} from the menu.", show_alert=True)
 
-        RESULT_STATE[key] = {
-            "search": search, "filtered_files": filtered, "current_files": filtered[:10],
-            "offset": 0, "total": len(filtered), "filter_kind": kind, "filter_value": value,
-        }
-        RESULT_KEYBOARDS[key] = _build_filter_keyboard(key, query.from_user.id, filtered, 0)
-        await query.message.edit_reply_markup(InlineKeyboardMarkup(RESULT_KEYBOARDS[key]))
-        await query.answer(f"Showing {len(filtered)} matching files"[:200])
+        def matches(item, filters_to_apply):
+            name = f"{getattr(item, 'file_name', '') or ''} {getattr(item, 'caption', '') or ''}".lower()
+            for filter_kind, filter_value in filters_to_apply.items():
+                if filter_kind == "lang":
+                    terms = aliases.get(filter_value, (filter_value.lower(),))
+                    if not any(re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", name) for term in terms):
+                        return False
+                elif filter_kind == "quality":
+                    if filter_value == "Other":
+                        if quality_pattern.search(name):
+                            return False
+                    elif not (re.search(rf"(?<!\d){re.escape(filter_value)}(?!\d)", name, re.I)
+                              or (filter_value == "2160p" and re.search(r"\b4k\b|\buhd\b", name, re.I))):
+                        return False
+            return True
+
+        filtered = [item for item in candidates if matches(item, active_filters)]
+        if not filtered:
+            label_map = {"BEN": "Bengali", "ENG": "English", "HIN": "Hindi", "KAN": "Kannada",
+                         "MAL": "Malayalam", "MAR": "Marathi", "TAM": "Tamil", "TEL": "Telugu"}
+            label = label_map.get(value, value) if kind == "lang" else value
+            # Do not mutate current filters when the new combination has no matches.
+            return await query.answer(
+                f"No {label} files match the current filters. Try another language/quality or press Restart.",
+                show_alert=True,
+            )
+
+        history.append(previous_filters)
+        state.update({
+            "search": search,
+            "base_files": candidates,
+            "active_filters": active_filters,
+            "filter_history": history,
+            "filtered_files": filtered,
+            "current_files": filtered[:10],
+            "offset": 0,
+            "total": len(filtered),
+            "filter_kind": kind,
+            "filter_value": value,
+        })
+        keyboard = _build_filter_keyboard(key, query.from_user.id, filtered, 0)
+        RESULT_KEYBOARDS[key] = list(keyboard)
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(keyboard))
+        summary = " + ".join(active_filters.values())
+        await query.answer(f"{len(filtered)} files: {summary}"[:200])
     except Exception as exc:
         logger.exception("Result filter failed: %s", exc)
         return await query.answer("Could not apply this filter. Please try again.", show_alert=True)
@@ -1273,7 +1293,7 @@ def _build_filter_keyboard(key, requester_id, files, offset):
     page_files = files[offset:offset + 10]
     rows = [[
         InlineKeyboardButton("📤 SEND ALL", callback_data=f"resultall:{key}"),
-        InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"resultlang:{key}"),
+        InlineKeyboardButton("🌐 LANGUAGE", callback_data=f"resultlang:{key}"),
         InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{key}"),
     ]]
     for file in page_files:
@@ -1289,7 +1309,27 @@ def _build_filter_keyboard(key, requester_id, files, offset):
     if offset + 10 < len(files):
         nav.append(InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{requester_id}_{key}_{offset + 10}"))
     rows.append(nav)
+    rows.append([
+        InlineKeyboardButton("« BACK", callback_data=f"resultundo:{key}"),
+        InlineKeyboardButton("♻️ RESTART", callback_data=f"resultreset:{key}"),
+    ])
     return rows
+
+
+def _custom_caption_for_media(media):
+    title = getattr(media, "file_name", None) or ""
+    size = get_size(getattr(media, "file_size", 0) or 0)
+    caption = getattr(media, "caption", None)
+    if CUSTOM_FILE_CAPTION:
+        try:
+            caption = CUSTOM_FILE_CAPTION.format(
+                file_name=title,
+                file_size=size,
+                file_caption=caption or "",
+            )
+        except Exception:
+            logger.exception("Could not format CUSTOM_FILE_CAPTION for SEND ALL")
+    return caption if caption is not None else title
 
 
 @Client.on_callback_query(filters.regex(r"^resultall:"))
@@ -1303,23 +1343,99 @@ async def result_send_all(client, query):
         files, _, _ = await get_search_results(BUTTONS[key], max_results=10, offset=0, filter=True)
     if not files:
         return await query.answer("No files on this page to send.", show_alert=True)
-    await query.answer(f"Sending {len(files)} files from this page…")
+    await query.answer(f"Sending {len(files[:10])} files from this page…")
     sent = 0
     for media in files[:10]:
         try:
-            await client.send_cached_media(query.message.chat.id, media.file_id)
+            await client.send_cached_media(
+                chat_id=query.from_user.id,
+                file_id=media.file_id,
+                caption=_custom_caption_for_media(media),
+            )
             sent += 1
         except FloodWait as e:
             await asyncio.sleep(e.value)
             try:
-                await client.send_cached_media(query.message.chat.id, media.file_id)
+                await client.send_cached_media(
+                    chat_id=query.from_user.id,
+                    file_id=media.file_id,
+                    caption=_custom_caption_for_media(media),
+                )
                 sent += 1
             except Exception as exc:
                 logger.warning("Unable to send result file: %s", exc)
         except Exception as exc:
             logger.warning("Unable to send result file: %s", exc)
     if sent == 0:
-        logger.warning("SEND ALL was clicked but no files could be delivered for key %s", key)
+        await query.answer("Could not send files. Start the bot in your private chat and try again.", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^resultundo:"))
+async def result_undo_filter(client, query):
+    key = query.data.split(":", 1)[1]
+    state = RESULT_STATE.get(key)
+    if not state or not state.get("filtered_files"):
+        return await query.answer("No previous filter state. Press Restart to clear filters.", show_alert=True)
+    history = list(state.get("filter_history") or [])
+    if history:
+        state["active_filters"] = history.pop()
+        state["filter_history"] = history
+    else:
+        state["active_filters"] = {}
+    active = state.get("active_filters") or {}
+    base_files = state.get("base_files") or []
+    if active:
+        # Reapply the previous active filter combination using the same matching rules.
+        aliases = {
+            "BEN": ("bengali", "bangla", "ben", "bn"), "ENG": ("english", "eng", "en"),
+            "HIN": ("hindi", "hin", "hi"), "KAN": ("kannada", "kanada", "kannad", "kan", "kn"),
+            "MAL": ("malayalam", "mal", "mly", "ml"), "MAR": ("marathi", "mar", "mr"),
+            "TAM": ("tamil", "tam", "ta"), "TEL": ("telugu", "tel", "te"),
+        }
+        qpat = re.compile(r"(?<!\d)(2160p|1440p|1080p|720p|540p|480p|360p|4k|uhd)(?!\d)", re.I)
+        filtered = []
+        for item in base_files:
+            name = f"{getattr(item, 'file_name', '') or ''} {getattr(item, 'caption', '') or ''}".lower()
+            ok = True
+            for kind, value in active.items():
+                if kind == "lang" and not any(re.search(rf"(?<![a-z]){re.escape(t)}(?![a-z])", name) for t in aliases.get(value, (value.lower(),))):
+                    ok = False; break
+                if kind == "quality":
+                    if value == "Other" and qpat.search(name): ok = False; break
+                    if value != "Other" and not (re.search(rf"(?<!\d){re.escape(value)}(?!\d)", name, re.I) or (value == "2160p" and re.search(r"\b4k\b|\buhd\b", name, re.I))):
+                        ok = False; break
+            if ok: filtered.append(item)
+    else:
+        filtered = base_files
+    state.update({"filtered_files": filtered, "current_files": filtered[:10], "offset": 0, "total": len(filtered)})
+    keyboard = _build_filter_keyboard(key, query.from_user.id, filtered, 0)
+    RESULT_KEYBOARDS[key] = list(keyboard)
+    try:
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(keyboard))
+    except MessageNotModified:
+        pass
+    await query.answer("Previous filter restored" if active else "All filters cleared")
+
+
+@Client.on_callback_query(filters.regex(r"^resultreset:"))
+async def result_reset_filters(client, query):
+    key = query.data.split(":", 1)[1]
+    state = RESULT_STATE.get(key)
+    if not state:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    base_files = state.get("base_files")
+    if base_files is None:
+        base_files, _, _ = await get_search_results(BUTTONS.get(key, state.get("search", "")), max_results=1000, offset=0, filter=True)
+        base_files = list(base_files or [])
+    state.update({"base_files": base_files, "active_filters": {}, "filter_history": [], "filtered_files": None,
+                  "current_files": base_files[:10], "offset": 0, "total": len(base_files), "filter_kind": None, "filter_value": None})
+    keyboard = _build_filter_keyboard(key, query.from_user.id, base_files, 0)
+    RESULT_KEYBOARDS[key] = list(keyboard)
+    try:
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(keyboard))
+    except MessageNotModified:
+        pass
+    await query.answer("Filters restarted")
 
 async def manual_filters(client, message, text=False):
     group_id = message.chat.id
