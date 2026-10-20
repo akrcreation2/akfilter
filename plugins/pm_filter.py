@@ -177,7 +177,6 @@ async def next_page(bot, query):
                     InlineKeyboardButton(text=f"{file.file_name}"[:60], callback_data=f'files#{file.file_id}'),
                     InlineKeyboardButton(text=f"{get_size(file.file_size)}", callback_data=f'files_#{file.file_id}')
                 ])
-            btn.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file.file_id}")])
             
     if 0 < offset <= 10:
         off_set = 0
@@ -347,7 +346,6 @@ async def cb_handler(client: Client, query: CallbackQuery):
                     InlineKeyboardButton(text=f.file_name[:60], callback_data=f"files#{f.file_id}"),
                     InlineKeyboardButton(text=f"{get_size(f.file_size)}", callback_data=f"files_#{f.file_id}"),
                 ])
-            buttons.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{f.file_id}")])
         await query.message.edit_text(
             f"🎬 <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
             "\n\n📁 Available files:",
@@ -593,7 +591,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
                             chat_id=query.from_user.id,
                             file_id=file_id,
                             caption=f_caption,
-                            protect_content=True if ident == "filep" else False
+                            protect_content=True if ident == "filep" else False,
+                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file_id}")]])
                         )
         except UserIsBlocked:
             await query.answer('Unblock the bot mahn !', show_alert=True)
@@ -642,7 +641,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
             chat_id=query.from_user.id,
             file_id=file_id,
             caption=f_caption,
-            protect_content=True if ident == 'checksubp' else False
+            protect_content=True if ident == 'checksubp' else False,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file_id}")]])
         )
     elif query.data == "pages":
         await query.answer()
@@ -957,7 +957,6 @@ async def auto_filter(client, msg, spoll=False):
                     InlineKeyboardButton(text=f"{file.file_name}"[:60], callback_data=f'{pre}#{file.file_id}'),
                     InlineKeyboardButton(text=f"{get_size(file.file_size)}", callback_data=f'{pre}#{file.file_id}')
                 ])
-            btn.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file.file_id}")])
         if offset != "":
             key = f"{message.chat.id}-{message.id}"
             BUTTONS[key] = search
@@ -1352,6 +1351,7 @@ async def result_send_all(client, query):
                 chat_id=query.from_user.id,
                 file_id=media.file_id,
                 caption=_custom_caption_for_media(media),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{media.file_id}")]]),
             )
             sent += 1
         except FloodWait as e:
@@ -1474,6 +1474,7 @@ async def manual_filters(client, message, text=False):
                             group_id,
                             fileid,
                             caption=reply_text or "",
+                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{fileid}")]]),
                             reply_to_message_id=reply_id
                         )
                     else:
