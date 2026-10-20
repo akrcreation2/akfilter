@@ -20,6 +20,7 @@ from database.ia_filterdb import Media, get_file_details, get_search_results
 from ai_search.integration import ai_aware_search
 from ai_search.discovery import discover_movies_with_timeout, looks_like_discovery_query
 from ai_search.discovery_store import get as get_discovery, put as put_discovery
+from plugins.stream_links import create_stream_links
 from database.filters_mdb import (
     del_all,
     find_filter,
@@ -167,27 +168,16 @@ async def next_page(bot, query):
         cap_text = "\n".join(cap_lines)
         btn = []
     else:
-        if settings['button']:
-            btn = [
-                [
-                    InlineKeyboardButton(
-                        text=f"📂[{get_size(file.file_size)}] ➵ {file.file_name}", callback_data=f'files#{file.file_id}'
-                    ),
-                ]
-                for file in files
-            ]
-        else:
-            btn = [
-                [
-                    InlineKeyboardButton(
-                        text=f"{file.file_name}", callback_data=f'files#{file.file_id}'
-                    ),
-                    InlineKeyboardButton(
-                        text=f"{get_size(file.file_size)}", callback_data=f'files_#{file.file_id}'
-                    ),
-                ]
-                for file in files
-            ]
+        btn = []
+        for file in files:
+            if settings['button']:
+                btn.append([InlineKeyboardButton(text=f"📂[{get_size(file.file_size)}] ➵ {file.file_name}"[:64], callback_data=f'files#{file.file_id}')])
+            else:
+                btn.append([
+                    InlineKeyboardButton(text=f"{file.file_name}"[:60], callback_data=f'files#{file.file_id}'),
+                    InlineKeyboardButton(text=f"{get_size(file.file_size)}", callback_data=f'files_#{file.file_id}')
+                ])
+            btn.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file.file_id}")])
             
     if 0 < offset <= 10:
         off_set = 0
@@ -272,6 +262,29 @@ async def advantage_spoll_choker(bot, query):
 
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
+    if query.data.startswith("streamlinks#"):
+        file_id = query.data.split("#", 1)[1]
+        try:
+            details = await get_file_details(file_id)
+            if not details:
+                return await query.answer("File is no longer available.", show_alert=True)
+            media = details[0]
+            watch_url, download_url, expires_at = await create_stream_links(client, file_id, getattr(media, "file_name", "file"))
+            from datetime import datetime, timezone
+            expiry_text = datetime.fromtimestamp(expires_at, timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+            message_text = (
+                f"🎬 <b>{getattr(media, 'file_name', 'Your file')}</b>\n\n"
+                f"<b>Stream online:</b> {watch_url}\n\n"
+                f"<b>Download link:</b> {download_url}\n\n"
+                f"⏳ <b>Links will be active for only 24 hours.</b>\n"
+                f"<i>Expires: {expiry_text}</i>"
+            )
+            await query.message.reply_text(message_text, disable_web_page_preview=True)
+            return await query.answer("24-hour stream/download links created.")
+        except Exception as exc:
+            logger.exception("Could not create stream/download links: %s", exc)
+            return await query.answer("Could not create links. Check STREAM_URL and LOG_CHANNEL settings.", show_alert=True)
+
     # This catch-all callback handler is registered before the dedicated filter
     # handlers, so route result-control callbacks here to prevent the generic
     # "Piracy Is Crime" answer from swallowing them.
@@ -325,16 +338,16 @@ async def cb_handler(client: Client, query: CallbackQuery):
         settings = await get_settings(query.message.chat.id)
         pre = 'filep' if settings['file_secure'] else 'file'
         buttons = []
-        if settings['button']:
-            buttons = [[InlineKeyboardButton(
-                text=f"📂[{get_size(f.file_size)}] ➵ {f.file_name}",
-                callback_data=f"files#{f.file_id}"
-            )] for f in files]
-        else:
-            buttons = [[
-                InlineKeyboardButton(text=f.file_name, callback_data=f"files#{f.file_id}"),
-                InlineKeyboardButton(text=f"{get_size(f.file_size)}", callback_data=f"files_#{f.file_id}"),
-            ] for f in files]
+        buttons = []
+        for f in files:
+            if settings['button']:
+                buttons.append([InlineKeyboardButton(text=f"📂[{get_size(f.file_size)}] ➵ {f.file_name}"[:64], callback_data=f"files#{f.file_id}")])
+            else:
+                buttons.append([
+                    InlineKeyboardButton(text=f.file_name[:60], callback_data=f"files#{f.file_id}"),
+                    InlineKeyboardButton(text=f"{get_size(f.file_size)}", callback_data=f"files_#{f.file_id}"),
+                ])
+            buttons.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{f.file_id}")])
         await query.message.edit_text(
             f"🎬 <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
             "\n\n📁 Available files:",
@@ -935,29 +948,16 @@ async def auto_filter(client, msg, spoll=False):
         else:
             btn.append([InlineKeyboardButton(text="📃 1/1", callback_data="pages")])
     else:
-        if settings["button"]:
-            btn = [
-                [
-                    InlineKeyboardButton(
-                        text=f"✨[{get_size(file.file_size)}]➵{file.file_name}", callback_data=f'{pre}#{file.file_id}'
-                    ),
-                ]
-                for file in files
-            ]
-        else:
-            btn = [
-                [
-                    InlineKeyboardButton(
-                        text=f"{file.file_name}",
-                        callback_data=f'{pre}#{file.file_id}',
-                    ),
-                    InlineKeyboardButton(
-                        text=f"{get_size(file.file_size)}",
-                        callback_data=f'{pre}#{file.file_id}',
-                    ),
-                ]
-                for file in files
-            ]
+        btn = []
+        for file in files:
+            if settings["button"]:
+                btn.append([InlineKeyboardButton(text=f"✨[{get_size(file.file_size)}]➵{file.file_name}"[:64], callback_data=f'{pre}#{file.file_id}')])
+            else:
+                btn.append([
+                    InlineKeyboardButton(text=f"{file.file_name}"[:60], callback_data=f'{pre}#{file.file_id}'),
+                    InlineKeyboardButton(text=f"{get_size(file.file_size)}", callback_data=f'{pre}#{file.file_id}')
+                ])
+            btn.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file.file_id}")])
         if offset != "":
             key = f"{message.chat.id}-{message.id}"
             BUTTONS[key] = search
@@ -1301,6 +1301,7 @@ def _build_filter_keyboard(key, requester_id, files, offset):
             text=f"✨[{get_size(file.file_size)}]➵{file.file_name}"[:64],
             callback_data=f"files#{file.file_id}"
         )])
+        rows.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file.file_id}")])
     total_pages = max(1, math.ceil(len(files) / 10))
     nav = []
     if offset > 0:
