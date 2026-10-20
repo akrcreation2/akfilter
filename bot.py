@@ -37,7 +37,7 @@ from plugins.webcode import bot_run
 PORT_CODE = environ.get("PORT", "8080")
 
 
-# ✅ Add this block
+# âœ… Add this block
 async def preload_auth_channels():
     if not await db.get_auth_channels():
         await db.set_auth_channels(DEFAULT_AUTH_CHANNELS)
@@ -71,8 +71,8 @@ class Bot(Client):
     async def kulasthree(self):
         while True:
             await asyncio.sleep(24 * 60 * 60)
-            logging.info("🔄 Bot is restarting")
-            await self.send_message(chat_id=LOG_CHANNEL, text="🔄 Bot is restarting ...")
+            logging.info("ðŸ”„ Bot is restarting")
+            await self.send_message(chat_id=LOG_CHANNEL, text="ðŸ”„ Bot is restarting ...")
             os.execl(sys.executable, sys.executable, *sys.argv)
 
     async def start(self, **kwargs):
@@ -87,7 +87,7 @@ class Bot(Client):
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
 
-        # ✅ preload auth channels from info.py if DB is empty
+        # âœ… preload auth channels from info.py if DB is empty
         await preload_auth_channels()
 
         logging.info(f"{me.first_name} running on Pyrogram v{__version__} (Layer {layer}) started on {me.username}.")
@@ -105,7 +105,7 @@ class Bot(Client):
         asyncio.create_task(self.kulasthree())
         asyncio.create_task(keep_alive())
 
-        client = webserver.AppRunner(await bot_run())
+        client = webserver.AppRunner(await bot_run(self))
         await client.setup()
         bind_address = "0.0.0.0"
         await webserver.TCPSite(client, bind_address, PORT_CODE).start()
