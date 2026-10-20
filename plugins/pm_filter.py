@@ -32,6 +32,7 @@ logger.setLevel(logging.ERROR)
 
 BUTTONS = {}
 RESULT_KEYBOARDS = {}
+RESULT_STATE = {}
 SPELL_CHECK = {}
 
 
@@ -125,11 +126,22 @@ async def next_page(bot, query):
         await query.answer(script.OLD_MES, show_alert=True)
         return
 
-    files, n_offset, total = await ai_aware_search(search, offset=offset, filter=True)
-    try:
-        n_offset = int(n_offset)
-    except:
-        n_offset = 0
+    state = RESULT_STATE.get(key, {})
+    filtered_files = state.get("filtered_files")
+    if filtered_files is not None:
+        total = len(filtered_files)
+        files = filtered_files[offset:offset + 10]
+        n_offset = offset + 10 if offset + 10 < total else 0
+    else:
+        files, n_offset, total = await ai_aware_search(search, offset=offset, filter=True)
+        try:
+            n_offset = int(n_offset)
+        except Exception:
+            n_offset = 0
+    if not files:
+        return await query.answer("No more files on this page.", show_alert=True)
+    state.update({"current_files": files, "offset": offset, "total": total})
+    RESULT_STATE[key] = state
 
     if not files:
         return
@@ -202,6 +214,9 @@ async def next_page(bot, query):
         InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{key}"),
     ])
     RESULT_KEYBOARDS[key] = list(btn)
+    state = RESULT_STATE.get(key, {})
+    state.update({"current_files": files, "offset": offset, "total": total})
+    RESULT_STATE[key] = state
 
     try:
         if HYPER_MODE:
@@ -246,7 +261,20 @@ async def advantage_spoll_choker(bot, query):
 
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
-    if query.data.startswith("aidiscpage:"):
+    # This catch-all callback handler is registered before the dedicated filter
+    # handlers, so route result-control callbacks here to prevent the generic
+    # "Piracy Is Crime" answer from swallowing them.
+    if query.data.startswith("resultlang:"):
+        return await result_language_menu(client, query)
+    elif query.data.startswith("resultquality:"):
+        return await result_quality_menu(client, query)
+    elif query.data.startswith("resultapply:"):
+        return await result_apply_filter(client, query)
+    elif query.data.startswith("resultback:"):
+        return await result_back(client, query)
+    elif query.data.startswith("resultall:"):
+        return await result_send_all(client, query)
+    elif query.data.startswith("aidiscpage:"):
         _, token, offset = query.data.split(":", 2)
         try:
             offset = int(offset)
@@ -935,6 +963,15 @@ async def auto_filter(client, msg, spoll=False):
         InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{control_key}"),
     ])
     RESULT_KEYBOARDS[control_key] = list(btn)
+    RESULT_STATE[control_key] = {
+        "search": search,
+        "filtered_files": None,
+        "current_files": list(files),
+        "offset": 0,
+        "total": total_results,
+        "filter_kind": None,
+        "filter_value": None,
+    }
 
     imdb = await get_poster(search, file=(files[0]).file_name) if settings["imdb"] else None
     TEMPLATE = settings['template']
@@ -1090,26 +1127,46 @@ async def advantage_spell_chok(client, msg):
     await spell_check_del.delete()
 
 
-@Client.on_callback_query(filters.regex(r"^resultlang:"))
 async def result_language_menu(client, query):
     key = query.data.split(":", 1)[1]
     if key not in BUTTONS:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    # Two-column language selector, with full names and familiar short labels.
-    langs = [("Malayalam", "MAL", "Malayalam"), ("Tamil", "TAM", "Tamil"),
-             ("English", "ENG", "English"), ("Hindi", "HIN", "Hindi"),
-             ("Telugu", "TEL", "Telugu"), ("Kannada", "KAN", "Kannada"),
-             ("Bengali", "BEN", "Bengali"), ("Marathi", "MAR", "Marathi")]
-    rows = [[InlineKeyboardButton("👇 SELECT YOUR LANGUAGES 👇", callback_data="pages")]]
-    for full, short, value in langs:
-        # Pair the full name and abbreviation; both buttons apply the same filter.
-        rows.append([
-            InlineKeyboardButton(full, callback_data=f"resultapply:{key}:lang:{value}"),
-            InlineKeyboardButton(short, callback_data=f"resultapply:{key}:lang:{value}"),
-        ])
-    rows.append([InlineKeyboardButton("« BACK", callback_data=f"resultback:{key}")])
-    await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+    # All 22 constitutionally scheduled Indian languages plus English.
+    langs = [
+        ("Assamese", "ASM", "Assamese|Asamiya|ASM|AS"),
+        ("Bengali", "BEN", "Bengali|Bangla|BEN|BN"),
+        ("Bodo", "BRX", "Bodo|BRX"),
+        ("Dogri", "DGO", "Dogri|DGO"),
+        ("English", "ENG", "English|ENG|EN"),
+        ("Gujarati", "GUJ", "Gujarati|GUJ|GU"),
+        ("Hindi", "HIN", "Hindi|HIN|HI"),
+        ("Kannada", "KAN", "Kannada|Kanada|Kannad|KAN|KN"),
+        ("Kashmiri", "KAS", "Kashmiri|KAS"),
+        ("Konkani", "KOK", "Konkani|KOK"),
+        ("Maithili", "MAI", "Maithili|MAI"),
+        ("Malayalam", "MAL", "Malayalam|MAL|ML"),
+        ("Manipuri", "MNI", "Manipuri|Meitei|MNI"),
+        ("Marathi", "MAR", "Marathi|MAR|MR"),
+        ("Nepali", "NEP", "Nepali|NEP|NE"),
+        ("Odia", "ORI", "Odia|Oriya|ORI|OD"),
+        ("Punjabi", "PUN", "Punjabi|Panjabi|PUN|PA"),
+        ("Sanskrit", "SAN", "Sanskrit|SAN"),
+        ("Santali", "SAT", "Santali|Santhali|SAT"),
+        ("Sindhi", "SND", "Sindhi|SND"),
+        ("Tamil", "TAM", "Tamil|TAM|TA"),
+        ("Telugu", "TEL", "Telugu|TEL|TE"),
+        ("Urdu", "URD", "Urdu|URD|UR"),
+    ]
+    rows = [[InlineKeyboardButton("👇 SELECT YOUR LANGUAGE 👇", callback_data="pages")]]
+    for full, short, aliases in langs:
+        rows.append([InlineKeyboardButton(full, callback_data=f"resultapply:{key}:lang:{short}")])
+    rows.append([InlineKeyboardButton("« BACK TO RESULTS", callback_data=f"resultback:{key}")])
+    try:
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+    except MessageNotModified:
+        pass
     await query.answer("Choose a language")
+
 
 @Client.on_callback_query(filters.regex(r"^resultquality:"))
 async def result_quality_menu(client, query):
@@ -1119,11 +1176,14 @@ async def result_quality_menu(client, query):
     qualities = ("2160p", "1440p", "1080p", "720p", "540p", "480p", "360p", "Other")
     rows = [[InlineKeyboardButton("👇 SELECT YOUR QUALITY 👇", callback_data="pages")]]
     for i in range(0, len(qualities), 2):
-        pair = qualities[i:i + 2]
-        rows.append([InlineKeyboardButton(q, callback_data=f"resultapply:{key}:quality:{q}") for q in pair])
-    rows.append([InlineKeyboardButton("« BACK", callback_data=f"resultback:{key}")])
-    await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+        rows.append([InlineKeyboardButton(q, callback_data=f"resultapply:{key}:quality:{q}") for q in qualities[i:i + 2]])
+    rows.append([InlineKeyboardButton("« BACK TO RESULTS", callback_data=f"resultback:{key}")])
+    try:
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+    except MessageNotModified:
+        pass
     await query.answer("Choose a quality")
+
 
 @Client.on_callback_query(filters.regex(r"^resultback:"))
 async def result_back(client, query):
@@ -1139,10 +1199,9 @@ async def result_back(client, query):
         pass
     await query.answer("Back to results")
 
+
 @Client.on_callback_query(filters.regex(r"^resultapply:"))
 async def result_apply_filter(client, query):
-    # Re-run the existing search pipeline with a metadata term; the original
-    # database search and download callbacks remain untouched.
     parts = query.data.split(":", 3)
     if len(parts) != 4:
         return await query.answer("Invalid filter.", show_alert=True)
@@ -1150,35 +1209,117 @@ async def result_apply_filter(client, query):
     search = BUTTONS.get(key)
     if not search:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    filtered_query = f"{search} {value}"
-    await query.answer(f"Filtering: {value}")
+
+    # Search the original title first, then filter metadata/name in memory. This
+    # avoids injecting a second user message and keeps the result controls in place.
     try:
-        search_message = await client.send_message(query.message.chat.id, filtered_query)
-        await auto_filter(client, search_message)
+        candidates, _, _ = await get_search_results(search, max_results=1000, offset=0, filter=True)
+        if not candidates:
+            candidates, _, _ = await ai_aware_search(search, offset=0, filter=True)
+        aliases = {
+            "ASM": ("assamese", "asamiya", "asm"), "BEN": ("bengali", "bangla", "ben"),
+            "BRX": ("bodo", "brx"), "DGO": ("dogri", "dgo"), "ENG": ("english", "eng"),
+            "GUJ": ("gujarati", "guj"), "HIN": ("hindi", "hin"),
+            "KAN": ("kannada", "kanada", "kannad", "kan"), "KAS": ("kashmiri", "kas"),
+            "KOK": ("konkani", "kok"), "MAI": ("maithili", "mai"),
+            "MAL": ("malayalam", "mal", "mly"), "MNI": ("manipuri", "meitei", "mni"),
+            "MAR": ("marathi", "mar"), "NEP": ("nepali", "nep"),
+            "ORI": ("odia", "oriya", "ori"), "PUN": ("punjabi", "panjabi", "pun"),
+            "SAN": ("sanskrit", "san"), "SAT": ("santali", "santhali", "sat"),
+            "SND": ("sindhi", "snd"), "TAM": ("tamil", "tam"),
+            "TEL": ("telugu", "tel"), "URD": ("urdu", "urd"),
+        }
+        quality_pattern = re.compile(r"(?<!\d)(2160p|1440p|1080p|720p|540p|480p|360p|4k|uhd)(?!\d)", re.I)
+        filtered = []
+        for item in candidates:
+            name = f"{getattr(item, 'file_name', '') or ''} {getattr(item, 'caption', '') or ''}".lower()
+            if kind == "lang":
+                terms = aliases.get(value, (value.lower(),))
+                # Match language names or standalone abbreviations, avoiding random substrings.
+                if any(re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", name) for term in terms):
+                    filtered.append(item)
+            elif kind == "quality":
+                if value == "Other":
+                    if not quality_pattern.search(name):
+                        filtered.append(item)
+                elif re.search(rf"(?<!\d){re.escape(value)}(?!\d)", name, re.I) or (value == "2160p" and re.search(r"\b4k\b|\buhd\b", name, re.I)):
+                    filtered.append(item)
+        if not filtered:
+            label = next((full for full, short, _ in [
+                ("Assamese", "ASM", ""), ("Bengali", "BEN", ""), ("Bodo", "BRX", ""),
+                ("Dogri", "DGO", ""), ("English", "ENG", ""), ("Gujarati", "GUJ", ""),
+                ("Hindi", "HIN", ""), ("Kannada", "KAN", ""), ("Kashmiri", "KAS", ""),
+                ("Konkani", "KOK", ""), ("Maithili", "MAI", ""), ("Malayalam", "MAL", ""),
+                ("Manipuri", "MNI", ""), ("Marathi", "MAR", ""), ("Nepali", "NEP", ""),
+                ("Odia", "ORI", ""), ("Punjabi", "PUN", ""), ("Sanskrit", "SAN", ""),
+                ("Santali", "SAT", ""), ("Sindhi", "SND", ""), ("Tamil", "TAM", ""),
+                ("Telugu", "TEL", ""), ("Urdu", "URD", "")
+            ] if short == value), value) if kind == "lang" else value
+            return await query.answer(f"No {label} files found for this search. Choose another {kind} from the menu.", show_alert=True)
+
+        RESULT_STATE[key] = {
+            "search": search, "filtered_files": filtered, "current_files": filtered[:10],
+            "offset": 0, "total": len(filtered), "filter_kind": kind, "filter_value": value,
+        }
+        RESULT_KEYBOARDS[key] = _build_filter_keyboard(key, query.from_user.id, filtered, 0)
+        await query.message.edit_reply_markup(InlineKeyboardMarkup(RESULT_KEYBOARDS[key]))
+        await query.answer(f"Showing {len(filtered)} matching files"[:200])
     except Exception as exc:
         logger.exception("Result filter failed: %s", exc)
-        await query.message.reply_text("Could not apply this filter. Try searching the movie name with the language/quality.")
+        return await query.answer("Could not apply this filter. Please try again.", show_alert=True)
+
+
+def _build_filter_keyboard(key, requester_id, files, offset):
+    page_files = files[offset:offset + 10]
+    rows = [[
+        InlineKeyboardButton("📤 SEND ALL", callback_data=f"resultall:{key}"),
+        InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"resultlang:{key}"),
+        InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{key}"),
+    ]]
+    for file in page_files:
+        rows.append([InlineKeyboardButton(
+            text=f"✨[{get_size(file.file_size)}]➵{file.file_name}"[:64],
+            callback_data=f"files#{file.file_id}"
+        )])
+    total_pages = max(1, math.ceil(len(files) / 10))
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton("◀️ BACK", callback_data=f"next_{requester_id}_{key}_{max(0, offset - 10)}"))
+    nav.append(InlineKeyboardButton(f"📃 {offset // 10 + 1} / {total_pages}", callback_data="pages"))
+    if offset + 10 < len(files):
+        nav.append(InlineKeyboardButton("NEXT ▶️", callback_data=f"next_{requester_id}_{key}_{offset + 10}"))
+    rows.append(nav)
+    return rows
+
 
 @Client.on_callback_query(filters.regex(r"^resultall:"))
 async def result_send_all(client, query):
     key = query.data.split(":", 1)[1]
-    search = BUTTONS.get(key)
-    if not search:
+    if key not in BUTTONS:
         return await query.answer("Search expired. Please search again.", show_alert=True)
-    await query.answer("Sending matching files…")
-    try:
-        files, _, _ = await get_search_results(search, max_results=50, offset=0, filter=True)
-        if not files:
-            return await query.message.reply_text("No matching files found.")
-        for media in files:
+    state = RESULT_STATE.get(key, {})
+    files = state.get("current_files")
+    if files is None:
+        files, _, _ = await get_search_results(BUTTONS[key], max_results=10, offset=0, filter=True)
+    if not files:
+        return await query.answer("No files on this page to send.", show_alert=True)
+    await query.answer(f"Sending {len(files)} files from this page…")
+    sent = 0
+    for media in files[:10]:
+        try:
+            await client.send_cached_media(query.message.chat.id, media.file_id)
+            sent += 1
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
             try:
                 await client.send_cached_media(query.message.chat.id, media.file_id)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.send_cached_media(query.message.chat.id, media.file_id)
-    except Exception as exc:
-        logger.exception("Send all failed: %s", exc)
-        await query.message.reply_text("Unable to send all files right now. Please try again later.")
+                sent += 1
+            except Exception as exc:
+                logger.warning("Unable to send result file: %s", exc)
+        except Exception as exc:
+            logger.warning("Unable to send result file: %s", exc)
+    if sent == 0:
+        logger.warning("SEND ALL was clicked but no files could be delivered for key %s", key)
 
 async def manual_filters(client, message, text=False):
     group_id = message.chat.id
