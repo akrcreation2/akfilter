@@ -1,13 +1,17 @@
-FROM python:3.10-slim-buster
+FROM python:3.10-slim
 
-RUN apt update && apt upgrade -y
-RUN apt install git -y
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y git && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /requirements.txt
+RUN pip3 install --no-cache-dir -U pip && \
+    pip3 install --no-cache-dir -U -r /requirements.txt
 
-RUN cd /
-RUN pip3 install -U pip && pip3 install -U -r requirements.txt
 RUN mkdir /shobanafilterbot
 WORKDIR /shobanafilterbot
-COPY start.sh /start.sh
-CMD ["python3", "bot.py"]
+COPY . /shobanafilterbot
 
+EXPOSE 8080
+
+CMD ["python3", "bot.py"]
