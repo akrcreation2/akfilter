@@ -1337,7 +1337,6 @@ def _build_filter_keyboard(key, requester_id, files, offset):
             text=f"✨[{get_size(file.file_size)}]➵{file.file_name}"[:64],
             callback_data=f"files#{file.file_id}"
         )])
-        rows.append([InlineKeyboardButton("🔗 Generate Stream / Download", callback_data=f"streamlinks#{file.file_id}")])
     total_pages = max(1, math.ceil(len(files) / 10))
     nav = []
     if offset > 0:
