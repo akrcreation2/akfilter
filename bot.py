@@ -34,22 +34,25 @@ pyroutils.MIN_CHANNEL_ID = -100999999999999
 
 from plugins.webcode import bot_run
 
-PORT_CODE = environ.get("PORT", "8080")
+PORT_CODE = int(environ.get("PORT", 8080))
 
 
-# âœ… Add this block
 async def preload_auth_channels():
     if not await db.get_auth_channels():
         await db.set_auth_channels(DEFAULT_AUTH_CHANNELS)
         logging.info("Set default AUTH_CHANNELs in DB.")
 
+
 async def keep_alive():
-    """Send a request every 111 seconds to keep the bot alive (if required)."""
+    """Send a request every 111 seconds to keep the bot alive on Render/Koyeb."""
+    if not KEEP_ALIVE_URL or not KEEP_ALIVE_URL.startswith("http"):
+        logging.warning("KEEP_ALIVE_URL is not set or invalid. Skipping keep-alive task.")
+        return
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                await session.get(KEEP_ALIVE_URL)
-                logging.info("Sent keep-alive request.")
+                async with session.get(KEEP_ALIVE_URL, timeout=10) as resp:
+                    logging.info(f"Keep-alive pinged ({resp.status})")
             except Exception as e:
                 logging.error(f"Keep-alive request failed: {e}")
             await asyncio.sleep(111)
@@ -71,11 +74,21 @@ class Bot(Client):
     async def kulasthree(self):
         while True:
             await asyncio.sleep(24 * 60 * 60)
-            logging.info("ðŸ”„ Bot is restarting")
-            await self.send_message(chat_id=LOG_CHANNEL, text="ðŸ”„ Bot is restarting ...")
+            logging.info("🔄 Bot is restarting")
+            try:
+                await self.send_message(chat_id=LOG_CHANNEL, text="🔄 Bot is restarting ...")
+            except Exception:
+                pass
             os.execl(sys.executable, sys.executable, *sys.argv)
 
     async def start(self, **kwargs):
+        # Start web server immediately so Render/Koyeb health checks pass
+        client = webserver.AppRunner(await bot_run())
+        await client.setup()
+        bind_address = "0.0.0.0"
+        await webserver.TCPSite(client, bind_address, PORT_CODE).start()
+        logging.info(f"Web server started on {bind_address}:{PORT_CODE}")
+
         b_users, b_chats = await db.get_banned()
         temp.BANNED_USERS = b_users
         temp.BANNED_CHATS = b_chats
@@ -87,7 +100,6 @@ class Bot(Client):
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
 
-        # âœ… preload auth channels from info.py if DB is empty
         await preload_auth_channels()
 
         logging.info(f"{me.first_name} running on Pyrogram v{__version__} (Layer {layer}) started on {me.username}.")
@@ -104,11 +116,6 @@ class Bot(Client):
 
         asyncio.create_task(self.kulasthree())
         asyncio.create_task(keep_alive())
-
-        client = webserver.AppRunner(await bot_run(self))
-        await client.setup()
-        bind_address = "0.0.0.0"
-        await webserver.TCPSite(client, bind_address, PORT_CODE).start()
 
     async def stop(self, *args):
         await super().stop()
