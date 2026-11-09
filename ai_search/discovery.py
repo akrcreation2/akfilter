@@ -131,7 +131,6 @@ def _year_from_text(text: str) -> Optional[int]:
     return None
 
 
-
 # ---------------------------------------------------------------------------
 # TMDB global movie/person metadata (optional credentials; no AI API required)
 # ---------------------------------------------------------------------------
@@ -144,8 +143,10 @@ _TMDB_LANGUAGE_CODES = {
     "german": "de", "italian": "it", "portuguese": "pt", "russian": "ru",
 }
 
+
 def _tmdb_enabled() -> bool:
     return bool(os.getenv("TMDB_ACCESS_TOKEN", "").strip() or os.getenv("TMDB_API_KEY", "").strip())
+
 
 def _tmdb_json(path: str, params: Optional[dict] = None):
     """Call TMDB using an environment token/key; never hard-code credentials."""
@@ -166,6 +167,7 @@ def _tmdb_json(path: str, params: Optional[dict] = None):
         return _get_json(_TMDB_BASE + path, query)
     return {}
 
+
 def _tmdb_movie_items(items, limit=MAX_RESULTS, source="tmdb"):
     out = []
     for item in items or []:
@@ -175,11 +177,14 @@ def _tmdb_movie_items(items, limit=MAX_RESULTS, source="tmdb"):
         date = item.get("release_date") or item.get("first_air_date") or ""
         year = None
         if isinstance(date, str) and re.match(r"^\d{4}", date):
-            try: year = int(date[:4])
-            except ValueError: pass
+            try:
+                year = int(date[:4])
+            except ValueError:
+                pass
         if title:
             out.append(MovieCandidate(title=str(title), year=year, source=source))
     return _dedupe(out, limit)
+
 
 def _tmdb_search_sync(query: str, limit=MAX_RESULTS) -> List[MovieCandidate]:
     """Search global TMDB movie metadata with optional year/language constraints."""
@@ -196,14 +201,12 @@ def _tmdb_search_sync(query: str, limit=MAX_RESULTS) -> List[MovieCandidate]:
     elif year_range:
         params["primary_release_date.gte"] = f"{min(year_range):04d}-01-01"
         params["primary_release_date.lte"] = f"{max(year_range):04d}-12-31"
-    # Do not force a translated UI language; search across original/translated titles.
     data = _tmdb_json("/search/movie", params)
     items = data.get("results", []) if isinstance(data, dict) else []
     candidates = _tmdb_movie_items(items, limit)
     if language:
         code = _TMDB_LANGUAGE_CODES.get(language.casefold())
         if code:
-            # Prefer language matches, but keep title matches if metadata lacks a language.
             matched = []
             for item in items:
                 if item.get("original_language") == code:
@@ -211,6 +214,7 @@ def _tmdb_search_sync(query: str, limit=MAX_RESULTS) -> List[MovieCandidate]:
             if matched:
                 candidates = _dedupe(matched, limit)
     return candidates
+
 
 def _tmdb_person_films_sync(person: str, limit=MAX_RESULTS, role="cast") -> List[MovieCandidate]:
     if not _tmdb_enabled() or not person:
@@ -238,7 +242,8 @@ def _tmdb_person_films_sync(person: str, limit=MAX_RESULTS, role="cast") -> List
         code = _TMDB_LANGUAGE_CODES.get(language.casefold())
         if code:
             matches = [x for x in items if x.get("original_language") == code]
-            if matches: items = matches
+            if matches:
+                items = matches
     items.sort(key=lambda x: x.get("release_date") or "", reverse=True)
     return _tmdb_movie_items(items, limit)
 
@@ -300,7 +305,6 @@ def _resolve_person_sync(name: str) -> Optional[Tuple[str, str]]:
         if _looks_like_person_entity(item, name):
             return item["id"], item["label"]
     return None
-
 
 
 def _resolve_language_qid_sync(language: str) -> Optional[str]:
@@ -366,6 +370,7 @@ def _wikidata_movies_by_filters_sync(
     except Exception:
         return []
 
+
 def _wikidata_films_sync(
     qids: Sequence[str],
     year: Optional[int] = None,
@@ -380,7 +385,6 @@ def _wikidata_films_sync(
     if not values:
         return []
 
-    # P161 = cast member, P57 = director, P162 = producer.
     relation = {"director": "P57", "producer": "P162"}.get(role, "P161")
     person_filters = "\n".join(f"?film wdt:{relation} wd:{qid}." for qid in qids if re.fullmatch(r"Q\d+", qid))
     filters = []
@@ -393,8 +397,6 @@ def _wikidata_films_sync(
 
     language_filter = ""
     if language:
-        # Resolve language label to a Wikidata entity. If resolution fails we
-        # leave language filtering to the broad web fallback instead of guessing.
         lang_item = _wikidata_entities_sync(language, limit=5)
         lang_qid = None
         for item in lang_item:
@@ -515,12 +517,10 @@ def _duckduckgo_search_sync(query: str, limit: int = 10) -> List[Tuple[str, str]
 
 def _movie_from_search_title(title: str) -> Optional[MovieCandidate]:
     text = re.sub(r"\s+", " ", html.unescape(title)).strip()
-    # Remove common search-engine / encyclopedia suffixes.
     text = re.sub(r"\s*[|–-]\s*(Wikipedia|IMDb|The Movie Database|TMDB).*$", "", text, flags=re.I)
     text = re.sub(r"\s+filmography.*$", "", text, flags=re.I)
     text = re.sub(r"\s+movies?$", "", text, flags=re.I)
     year = _year_from_text(text)
-    # Don't treat a pure person/topic page as a movie.
     low = text.casefold()
     if any(x in low for x in ("filmography", "actor", "actress", "singer", "director", "list of films")):
         return None
@@ -559,28 +559,21 @@ _FILE_WORDS = re.compile(
 
 
 def looks_like_discovery_query(query: str) -> bool:
-    """Only use external discovery for explicit movie/person discovery requests.
-
-    Short titles ("Kantara", "Yajman", "KGF"), language-only messages
-    ("Kannada"), and ordinary title + language queries must go to the bot's
-    own Media database first. External public search is noisy for these queries
-    and can return unrelated pages such as temples, dictionaries, or future films.
-    """
+    """Only use external discovery for explicit movie/person/song discovery requests."""
     q = re.sub(r"\s+", " ", (query or "").strip())
     if not q or _FILE_WORDS.search(q):
         return False
-    # Explicit discovery intent only: actor filmography / recommendations / cast.
     explicit_intent = re.search(
         r"\b(?:filmography|acted\s+by|movies?\s+(?:of|by|with)|films?\s+(?:of|by|with)|"
         r"all\s+(?:movies?|films?)\s+(?:of|by)|cast\s+of|who\s+(?:acted|stars?)\s+in|"
         r"recommend(?:ed|ations?)?\s+movies?|similar\s+movies?|"
-        r"\b[a-z][a-z .'-]{1,60}\s+movies?\b|acted\s+together|hero\s+and\s+heroine)",
+        r"songs?|lyrics?|bgm|soundtrack|"
+        r"[a-z][a-z .'-]{1,60}\s+(?:movies?|films?)|acted\s+together|hero\s+and\s+heroine)\b",
         q,
         re.IGNORECASE,
     )
     if explicit_intent:
         return True
-    # A bare language name is a filter, not an external movie-discovery query.
     if re.fullmatch(
         r"(?:kannada|kannad|hindi|hind|english|eng|tamil|tam|telugu|tel|malayalam|mal|"
         r"bengali|bangla|marathi|punjabi|gujarati|urdu)", q, re.IGNORECASE
@@ -611,26 +604,18 @@ def _query_constraints(query: str):
 
 
 def _candidate_person_phrases(query: str) -> List[str]:
-    """Generate a small number of likely human-name phrases.
-
-    This is intentionally bounded. It avoids hundreds of network requests for a
-    long Telegram paragraph while still handling lower-case names such as
-    "duniya vijay and priyamani movies".
-    """
     tokens = re.findall(r"[\wÀ-ÿ'-]+", query or "", flags=re.UNICODE)
     stop = _DISCOVERY_WORDS | {
         "kannada", "telugu", "tamil", "malayalam", "hindi", "english", "bengali", "marathi",
-        "year", "years", "movie", "movies", "film", "films", "movie", "please", "me", "give",
+        "year", "years", "movie", "movies", "film", "films", "please", "me", "give",
         "find", "show", "list", "available", "files", "file", "after", "before", "from", "to",
     }
     filtered = [t for t in tokens if t.casefold() not in stop and not t.isdigit()]
     phrases = []
-    # Prefer 2-3 token phrases, then single names.
     for n in (3, 2):
         for i in range(len(filtered) - n + 1):
             phrases.append(" ".join(filtered[i:i+n]))
     phrases.extend(filtered)
-    # Preserve original order and cap work.
     return list(dict.fromkeys(phrases))[:24]
 
 
@@ -638,7 +623,6 @@ def _resolve_people_sync(query: str, max_people: int = 4) -> List[Tuple[str, str
     phrases = _candidate_person_phrases(query)
     found = []
     seen = set()
-    # Longer phrases first. We only keep confident person entities.
     for phrase in phrases:
         result = _resolve_person_sync(phrase)
         if not result:
@@ -654,7 +638,6 @@ def _resolve_people_sync(query: str, max_people: int = 4) -> List[Tuple[str, str
 
 
 def _person_hint_from_query(query: str) -> Optional[str]:
-    """Fast path for the common '[person] movies' shape."""
     q = re.sub(r"\s+", " ", query or "").strip()
     patterns = [
         r"^(.{2,80}?)\s+(?:movies?|films?|filmography)\s*$",
@@ -672,7 +655,6 @@ def _person_hint_from_query(query: str) -> Optional[str]:
 
 
 def _person_query_role(query: str) -> str:
-    """Return the relationship requested for a person discovery query."""
     q = (query or "").casefold()
     if re.search(r"\b(direct(?:ed|or|ion)?|direction|directorial)\b", q):
         return "director"
@@ -682,7 +664,6 @@ def _person_query_role(query: str) -> str:
 
 
 def _person_hint_from_natural_query(query: str) -> Optional[str]:
-    """Extract names from common natural-language filmography prompts."""
     q = re.sub(r"\s+", " ", (query or "")).strip(" ?.!\t")
     patterns = [
         r"^(.{2,70}?)\s+acted\s+in\s+which\s+movies?\s*$",
@@ -702,56 +683,59 @@ def _person_hint_from_natural_query(query: str) -> Optional[str]:
 
 
 def _discover_sync(query: str, limit: int = MAX_RESULTS) -> List[MovieCandidate]:
+    from .filmography import normalize_person
+
     year, year_range, language = _query_constraints(query)
+    is_song_query = bool(re.search(r"\b(?:songs?|lyrics?|bgm|soundtrack)\b", query, re.I))
 
-    # 1) Structured people search. This is the most accurate and fastest route
-    # for filmography and "acted together" questions.
-    person_hint = _person_hint_from_natural_query(query) or _person_hint_from_query(query)
-    role = _person_query_role(query)
-    people: List[Tuple[str, str]] = []
-    if person_hint:
-        resolved = _resolve_person_sync(person_hint)
-        if resolved:
-            people = [resolved]
-    if not people:
-        people = _resolve_people_sync(query, max_people=1)
+    person_hint = None
+    if not is_song_query:
+        person_hint = _person_hint_from_natural_query(query) or _person_hint_from_query(query)
+        if person_hint:
+            person_hint = normalize_person(person_hint) or person_hint
+        role = _person_query_role(query)
 
-    if people:
-        movies = _wikidata_films_sync(
-            [qid for qid, _ in people[:1]],
-            year=year,
-            year_range=year_range,
-            language=language,
-            limit=limit,
-            role=role,
-        )
-        if movies:
-            return _dedupe(movies, limit)
-        # TMDB is a structured fallback for people whose Wikidata filmography is incomplete.
-        tmdb_movies = _tmdb_person_films_sync(person_hint or people[0][1], limit=limit, role=role)
-        if tmdb_movies:
-            return _dedupe(tmdb_movies, limit)
-        # Person queries should not fall through to generic web results, which
-        # previously turned unrelated page titles into movie suggestions.
-        return []
+        if person_hint and _tmdb_enabled():
+            tmdb_movies = _tmdb_person_films_sync(person_hint, limit=limit, role=role)
+            if tmdb_movies:
+                return _dedupe(tmdb_movies, limit)
 
-    # A language/year-only request can be answered directly from public
-    # structured movie metadata; no person or local file index is needed.
-    if language or year or year_range:
+        people: List[Tuple[str, str]] = []
+        if person_hint:
+            resolved = _resolve_person_sync(person_hint)
+            if resolved:
+                people = [resolved]
+        if not people:
+            people = _resolve_people_sync(query, max_people=1)
+
+        if people:
+            movies = _wikidata_films_sync(
+                [qid for qid, _ in people[:1]],
+                year=year,
+                year_range=year_range,
+                language=language,
+                limit=limit,
+                role=role,
+            )
+            if movies:
+                return _dedupe(movies, limit)
+            tmdb_movies = _tmdb_person_films_sync(person_hint or people[0][1], limit=limit, role=role)
+            if tmdb_movies:
+                return _dedupe(tmdb_movies, limit)
+            return []
+
+    if (language or year or year_range) and not is_song_query:
         movies = _wikidata_movies_by_filters_sync(
             year=year, year_range=year_range, language=language, limit=limit
         )
         if movies:
             return _dedupe(movies, limit)
 
-    # 2) TMDB global movie metadata search (optional). It is structured and
-    # supports original/translated titles across many languages.
-    tmdb_movies = _tmdb_search_sync(query, limit=limit)
-    if tmdb_movies:
-        return _dedupe(tmdb_movies, limit)
+    if not is_song_query:
+        tmdb_movies = _tmdb_search_sync(query, limit=limit)
+        if tmdb_movies:
+            return _dedupe(tmdb_movies, limit)
 
-    # 3) Wikipedia public search for title/topic queries and when Wikidata has
-    # incomplete cast/release metadata.
     wiki_queries = [query]
     if person_hint:
         wiki_queries.insert(0, f"{person_hint} filmography")
@@ -760,8 +744,6 @@ def _discover_sync(query: str, limit: int = MAX_RESULTS) -> List[MovieCandidate]
         if movies:
             return _dedupe(movies, limit)
 
-    # 4) Broad web search fallback. This is deliberately after structured
-    # sources so arbitrary prose remains quick for common actor queries.
     results = _duckduckgo_search_sync(query, limit=12)
     out = []
     for title, url in results:
@@ -809,8 +791,6 @@ async def discover_movies_with_timeout(query: str, limit: int = 40) -> List[Movi
     if not looks_like_discovery_query(query):
         return []
     try:
-        # A normal request should not make the bot wait indefinitely.  The cache
-        # makes repeat searches effectively immediate after the first request.
         return await asyncio.wait_for(
             asyncio.to_thread(discover_movies_from_query, query, limit),
             timeout=float(os.getenv("AI_DISCOVERY_TIMEOUT", "18")),
