@@ -355,15 +355,27 @@ async def cb_handler(client: Client, query: CallbackQuery):
         if movies is None or index < 0 or index >= len(movies):
             return await query.answer("This AI search has expired. Search again.", show_alert=True)
         movie = movies[index]
-        # IMPORTANT: only now do we query the bot's Media/file database.
-        search_title = movie.title
+                # IMPORTANT: only now do we query the bot's Media/file database.
+        clean_title = re.sub(r"[^\w\s]", " ", movie.title)
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        compact_title = re.sub(r"[.:'\"-]+", "", movie.title)
+        compact_title = re.sub(r"\s+", " ", compact_title).strip()
+
+        search_variants = []
         if movie.year:
-            search_title = f"{movie.title} {movie.year}"
+            search_variants.append(f"{movie.title} {movie.year}")
+            search_variants.append(f"{compact_title} {movie.year}")
+        search_variants.extend([movie.title, compact_title, clean_title])
+
         await query.answer("Searching available files…")
-        files, offset, total = await get_search_results(search_title, None, 10, 0, True)
-        if not files:
-            # Retry title-only because filenames often omit the release year.
-            files, offset, total = await get_search_results(movie.title, None, 10, 0, True)
+        files, offset, total = [], "", 0
+        for variant in dict.fromkeys(v for v in search_variants if v):
+            files, offset, total = await get_search_results(variant, None, 10, 0, True)
+            if files:
+                break
+        if not files and compact_title:
+            files, offset, total = await ai_aware_search(compact_title, None, 10, 0, True)
+
         if not files:
             return await query.message.edit_text(
                 f"❌ <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
