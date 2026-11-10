@@ -337,7 +337,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data.startswith("resultundo:"):
         return await result_undo_filter(client, query)
     elif query.data.startswith("resultreset:"):
-        return await result_reset_filters(client, query)    
+        return await result_reset_filters(client, query)
     elif query.data.startswith("aidiscpage:"):
         _, token, offset = query.data.split(":", 2)
         try:
@@ -419,6 +419,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         )
         return
     elif query.data == "close_data":
+
         await query.message.delete()
     elif query.data == "delallconfirm":
         userid = query.from_user.id
