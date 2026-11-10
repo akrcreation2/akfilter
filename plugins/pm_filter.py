@@ -337,7 +337,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data.startswith("resultundo:"):
         return await result_undo_filter(client, query)
     elif query.data.startswith("resultreset:"):
-        return await result_reset_filters(client, query)
+        return await result_reset_filters(client, query)    
     elif query.data.startswith("aidiscpage:"):
         _, token, offset = query.data.split(":", 2)
         try:
@@ -345,7 +345,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         except Exception:
             offset = 0
         return await _show_ai_discovery_page(query, token, offset)
-        elif query.data.startswith("aidisc:"):
+    elif query.data.startswith("aidisc:"):
         _, token, index = query.data.split(":", 2)
         try:
             index = int(index)
