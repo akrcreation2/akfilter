@@ -369,14 +369,17 @@ async def cb_handler(client: Client, query: CallbackQuery):
                 search_variants.append(f"{compact_title} {movie.year}")
             search_variants.extend([movie.title, compact_title, clean_title])
 
-            found_files, found_offset, found_total = [], "", 0
+            found_files, found_offset, found_total, used_variant = [], "", 0, (compact_title or movie.title)
             for variant in dict.fromkeys(v for v in search_variants if v):
                 found_files, found_offset, found_total = await get_search_results(variant, None, 10, 0, True)
                 if found_files:
+                    used_variant = variant
                     break
             if not found_files and compact_title:
                 found_files, found_offset, found_total = await ai_aware_search(compact_title, None, 10, 0, True)
-            return found_files, found_offset, found_total
+                if found_files:
+                    used_variant = compact_title
+            return found_files, found_offset, found_total, used_variant
 
         search_task = asyncio.create_task(_search_all_variants())
         frames = ["🔎", "🔍", "🔎", "🔍"]
@@ -393,7 +396,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             step += 1
             await asyncio.sleep(0.7)
 
-        files, offset, total = await search_task
+        files, offset, total, used_variant = await search_task
         if not files:
             return await query.message.edit_text(
                 f"❌ <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
@@ -402,7 +405,16 @@ async def cb_handler(client: Client, query: CallbackQuery):
             )
 
         settings = await get_settings(query.message.chat.id)
-        buttons = []
+        key = f"{query.message.chat.id}-{query.message.id}"
+        BUTTONS[key] = used_variant
+        req = query.from_user.id
+
+        buttons = [
+            [
+                InlineKeyboardButton("🌐 LANGUAGE", callback_data=f"languages#{key}#{req}#0"),
+                InlineKeyboardButton("🎞️ QUALITY", callback_data=f"quality#{key}#{req}#0"),
+            ]
+        ]
         for f in files:
             if settings['button']:
                 buttons.append([InlineKeyboardButton(text=f"📂[{get_size(f.file_size)}] ➵ {f.file_name}"[:64], callback_data=f"files#{f.file_id}")])
