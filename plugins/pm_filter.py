@@ -345,7 +345,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         except Exception:
             offset = 0
         return await _show_ai_discovery_page(query, token, offset)
-    elif query.data.startswith("aidisc:"):
+        elif query.data.startswith("aidisc:"):
         _, token, index = query.data.split(":", 2)
         try:
             index = int(index)
@@ -355,37 +355,53 @@ async def cb_handler(client: Client, query: CallbackQuery):
         if movies is None or index < 0 or index >= len(movies):
             return await query.answer("This AI search has expired. Search again.", show_alert=True)
         movie = movies[index]
-                # IMPORTANT: only now do we query the bot's Media/file database.
-        clean_title = re.sub(r"[^\w\s]", " ", movie.title)
-        clean_title = re.sub(r"\s+", " ", clean_title).strip()
-        compact_title = re.sub(r"[.:'\"-]+", "", movie.title)
-        compact_title = re.sub(r"\s+", " ", compact_title).strip()
+        await query.answer()
 
-        search_variants = []
-        if movie.year:
-            search_variants.append(f"{movie.title} {movie.year}")
-            search_variants.append(f"{compact_title} {movie.year}")
-        search_variants.extend([movie.title, compact_title, clean_title])
+        async def _search_all_variants():
+            clean_title = re.sub(r"[^\w\s]", " ", movie.title)
+            clean_title = re.sub(r"\s+", " ", clean_title).strip()
+            compact_title = re.sub(r"[.:'\"-]+", "", movie.title)
+            compact_title = re.sub(r"\s+", " ", compact_title).strip()
 
-        await query.answer("Searching available files…")
-        files, offset, total = [], "", 0
-        for variant in dict.fromkeys(v for v in search_variants if v):
-            files, offset, total = await get_search_results(variant, None, 10, 0, True)
-            if files:
-                break
-        if not files and compact_title:
-            files, offset, total = await ai_aware_search(compact_title, None, 10, 0, True)
+            search_variants = []
+            if movie.year:
+                search_variants.append(f"{movie.title} {movie.year}")
+                search_variants.append(f"{compact_title} {movie.year}")
+            search_variants.extend([movie.title, compact_title, clean_title])
 
+            found_files, found_offset, found_total = [], "", 0
+            for variant in dict.fromkeys(v for v in search_variants if v):
+                found_files, found_offset, found_total = await get_search_results(variant, None, 10, 0, True)
+                if found_files:
+                    break
+            if not found_files and compact_title:
+                found_files, found_offset, found_total = await ai_aware_search(compact_title, None, 10, 0, True)
+            return found_files, found_offset, found_total
+
+        search_task = asyncio.create_task(_search_all_variants())
+        frames = ["🔎", "🔍", "🔎", "🔍"]
+        step = 0
+        while not search_task.done():
+            icon = frames[step % len(frames)]
+            try:
+                await query.message.edit_text(
+                    f"{icon} <b>Please wait, I am searching my database...</b>\n\n🎬 <i>{movie.title}</i>",
+                    parse_mode=enums.ParseMode.HTML,
+                )
+            except Exception:
+                pass
+            step += 1
+            await asyncio.sleep(0.7)
+
+        files, offset, total = await search_task
         if not files:
             return await query.message.edit_text(
                 f"❌ <b>{movie.title}</b>" + (f" ({movie.year})" if movie.year else "") +
                 "\n\nNo matching files are available in this bot.",
                 parse_mode=enums.ParseMode.HTML,
             )
-        # Reuse the existing result renderer/flow.
+
         settings = await get_settings(query.message.chat.id)
-        pre = 'filep' if settings['file_secure'] else 'file'
-        buttons = []
         buttons = []
         for f in files:
             if settings['button']:
