@@ -411,8 +411,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
         buttons = [
             [
-                InlineKeyboardButton("🌐 LANGUAGE", callback_data=f"languages#{key}#{req}#0"),
-                InlineKeyboardButton("🎞️ QUALITY", callback_data=f"quality#{key}#{req}#0"),
+                InlineKeyboardButton("🌐 LANGUAGES", callback_data=f"resultlang:{control_key}"),
+                InlineKeyboardButton("🎞 QUALITY", callback_data=f"resultquality:{control_key}"),
             ]
         ]
         for f in files:
